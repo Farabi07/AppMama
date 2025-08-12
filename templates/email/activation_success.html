@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activation Successful</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #333;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            border-radius: 10px;
+            background: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: #4CAF50;
+            animation: fadeIn 1.5s ease-in-out;
+        }
+        .checkmark {
+            font-size: 80px;
+            color: #4CAF50;
+            animation: scaleUp 1s ease-out;
+        }
+        p {
+            font-size: 1.1rem;
+            color: #555;
+            margin-top: 15px;
+            opacity: 0;
+            animation: fadeIn 2s ease-in-out 1s forwards;
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: translateY(-20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes scaleUp {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
+        }
+
+        .button {
+            margin-top: 30px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .button:hover {
+            background-color: #45a049;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="checkmark">✅</div>
+        <h2>Your account has been successfully activated!</h2>
+        <p>Thank you for joining us. You can now enjoy full access to your account.</p>
+        {% comment %} <button class="button">Go to Dashboard</button> {% endcomment %}
+    </div>
+</body>
+</html>

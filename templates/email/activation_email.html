@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Activate Your Account</title>
+<style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f7f7f7;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+    .email-container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+    .logo img {
+      max-width: 150px;
+      height: auto;
+    }
+    h2 {
+      color: #333333;
+      font-size: 24px;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.5;
+      margin-bottom: 15px;
+    }
+    .button {
+      background-color: #007bff;
+      color: #ffffff;
+      padding: 14px 28px;
+      text-decoration: none;
+      border-radius: 5px;
+      display: inline-block;
+      font-size: 16px;
+      font-weight: 600;
+      text-align: center;
+      transition: background-color 0.3s ease;
+    }
+    .button:hover {
+      background-color: #0056b3;
+    }
+    .footer {
+      margin-top: 30px;
+      font-size: 12px;
+      color: #888888;
+      text-align: center;
+      line-height: 1.6;
+    }
+    .footer a {
+      color: #007bff;
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
+    }
+</style>
+</head>
+<body>
+<div class="email-container">
+  <div class="logo">
+    <img src="https://yourdomain.com/logo.png" alt="App Logo" />
+  </div>
+  <h2>Welcome to [Your App Name]!</h2>
+  <p>Dear <strong>{{userName}},</strong></p>
+  <p>Thank you for registering with [Your App Name]. We’re excited to have you onboard!</p>
+  <p>To get started, please activate your account by clicking the button below:</p>
+  <p style="text-align: center; margin: 30px 0;">
+    <a href="{{activationLink}}" class="button">Activate Your Account</a>
+  </p>
+  <p>If you’re having trouble with the button above, simply copy and paste the following link into your browser:</p>
+  <p style="text-align: center;">
+    <a href="{{activationLink}}" style="color: #007bff;">{{activationLink}}</a>
+  </p>
+  <p>If you did not sign up for an account, please disregard this email. No action is required.</p>
+  <div class="footer">
+    <p>&copy; {{year}} [Your Company Name]. All rights reserved.</p>
+    <p>If you have any questions, please <a href="mailto:support@yourdomain.com">contact our support team</a>.</p>
+  </div>
+</div>
+</body>
+</html>
