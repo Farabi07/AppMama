@@ -15,7 +15,7 @@ from authentication.filters import PartnerFilter
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
 
-from authentication.permissions import IsPartner, IsAdmin
+from authentication.permissions import  IsAdmin
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 

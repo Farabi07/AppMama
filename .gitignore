@@ -8,7 +8,7 @@ __pycache__/
 .git
 .vscode
 staticfiles/
-# static/
+static/
 data/
 .env
 venv

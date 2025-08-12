@@ -65,7 +65,19 @@ class EmployeeFilter(filters.FilterSet):
     class Meta:
         model = Employee
         fields = ['username', ]
+class PartnerFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name="name", lookup_expr='icontains')
 
+    class Meta:
+        model = Partner
+        fields = ['name', ]
+
+class ChildFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name="name", lookup_expr='icontains')
+
+    class Meta:
+        model = Child
+        fields = ['name', ]
 class LoginHistoryFilter(filters.FilterSet):
     username = filters.CharFilter(field_name="user__username", lookup_expr='icontains')
 
