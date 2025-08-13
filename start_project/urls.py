@@ -22,7 +22,7 @@ urlpatterns = [
     path('permission/', include('authentication.urls.permission_urls')),
     path('role/', include('authentication.urls.role_urls')),
     path('designation/', include('authentication.urls.designation_urls')),
-
+    path('task/', include('task.urls.task_urls')),
     path('country/', include('authentication.urls.country_urls')),
     path('branch/', include('authentication.urls.branch_urls')),
     path('city/', include('authentication.urls.city_urls')),

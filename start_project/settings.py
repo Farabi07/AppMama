@@ -65,6 +65,7 @@ INSTALLED_APPS = [
 
     #local
     'authentication.apps.AuthenticationConfig',
+    'task.apps.TaskConfig'
 ]
 SITE_ID = 1
 AUTHENTICATION_BACKENDS = (
