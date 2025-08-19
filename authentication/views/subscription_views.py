@@ -151,34 +151,6 @@ def create_subscription(request):
     except Exception as e:
         return Response({"error": str(e)}, status=400)
 
-
-
-# @api_view(['POST'])
-# @csrf_exempt
-# def stripe_webhook(request):
-#     payload = request.body
-#     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
-#     endpoint_secret = "your_stripe_webhook_signing_secret"  # Replace with your webhook signing secret
-    
-#     try:
-#         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-
-#         if event['type'] == 'invoice.payment_succeeded':
-#             # Handle successful payment
-#             invoice = event['data']['object']
-#             subscription_id = invoice['subscription']
-#             # You can update the subscription status in your database here
-
-#         elif event['type'] == 'invoice.payment_failed':
-#             # Handle failed payment
-#             invoice = event['data']['object']
-#             subscription_id = invoice['subscription']
-#             # You can update the subscription status in your database here
-
-#         return JsonResponse({'status': 'ok'}, status=200)
-#     except Exception as e:
-#         return JsonResponse({'error': 'Webhook error: ' + str(e)}, status=400)
-
 @csrf_exempt
 def stripe_webhook(request):
     from django.utils import timezone
@@ -223,3 +195,95 @@ def stripe_webhook(request):
     except Exception as e:
         print("Webhook error:", str(e))
         return JsonResponse({'error': str(e)}, status=400)
+    
+from datetime import datetime
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.utils import timezone
+from authentication.models import Subscription
+import logging
+
+# Map product_id to subscription duration in days
+PRODUCT_DURATION_MAP = {
+    'monthly_premium': 30,
+    'yearly_premium': 365,
+    # Add more products as needed
+}
+
+# Logging setup for debugging
+logger = logging.getLogger(__name__)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_subscription(request):
+    data = request.data
+    user = request.user
+    
+    # Log incoming data for debugging purposes
+    logger.info(f"Received data: {data}")
+
+    # Extract product information
+    product_id = data.get('product_id')
+    duration_days = PRODUCT_DURATION_MAP.get(product_id)
+    if not duration_days:
+        return Response({'error': 'Invalid product_id.'}, status=400)
+
+    # Set start and expiration dates
+    started_at = timezone.now()
+    expires_at = started_at + timezone.timedelta(days=duration_days)
+    
+    # Retrieve or create subscription
+    subscription, _ = Subscription.objects.get_or_create(user=user)
+    subscription.is_active = True
+    subscription.started_at = started_at
+    subscription.expires_at = expires_at
+    subscription.product_id = product_id
+    subscription.platform = data.get('platform')
+    subscription.purchase_token = data.get('purchase_token')
+    subscription.transaction_id = data.get('transaction_id')
+    subscription.original_transaction_id = data.get('original_transaction_id')
+    
+    # Handle purchase_date if provided
+    purchase_date_str = data.get('purchase_date')
+    if purchase_date_str:
+        try:
+            # Handle 'Z' as UTC in the string and parse into a datetime object
+            normalized_purchase_date = purchase_date_str.replace('Z', '+00:00')
+            subscription.purchase_date = datetime.fromisoformat(normalized_purchase_date)
+        except ValueError as e:
+            # Log the error and return a response
+            logger.error(f"Error parsing purchase_date: {purchase_date_str}. Error: {e}")
+            return Response({'error': 'Invalid purchase_date format.'}, status=400)
+    
+    # Set subscription status to active and save
+    subscription.status_is = 'active subscription'
+    subscription.save()
+
+    # Return success response
+    return Response({'success': True, 'message': 'Subscription activated.'})
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def subscription_status(request):
+    user = request.user
+    try:
+        subscription = Subscription.objects.get(user=user)
+        
+        # Sync status to ensure it's up to date
+        subscription.sync_status()
+        
+        return Response({
+            "status": subscription.status_is,
+            "expires_at": subscription.expires_at,
+        })
+        
+    except Subscription.DoesNotExist:
+        # This should rarely happen if signal is working properly
+        # But as a fallback, create subscription and start trial
+        subscription = Subscription.objects.create(user=user)
+        subscription.start_trial()
+        
+        return Response({
+            "status": subscription.status_is,
+            "expires_at": subscription.expires_at,
+        })

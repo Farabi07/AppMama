@@ -15,7 +15,8 @@ from PIL import Image
 from rest_framework.serializers import BaseSerializer
 from phonenumber_field.modelfields import PhoneNumberField
 from django.contrib.auth.hashers import make_password, check_password, identify_hasher
-
+from datetime import timedelta
+from django.db import transaction
 
 
 class Permission(models.Model):
@@ -478,57 +479,95 @@ class SubscriptionPlan(models.Model):
     
 class Subscription(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    plan = models.ForeignKey(SubscriptionPlan, null=True, blank=True, on_delete=models.SET_NULL)
-    is_active = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=False)  # Subscription active status
     started_at = models.DateTimeField(null=True, blank=True)  # Subscription start date
     expires_at = models.DateTimeField(null=True, blank=True)  # Subscription expiry date
-    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)  # Stripe customer ID
+    status_is = models.CharField(max_length=255, null=True, blank=True)
+    # Trial information
     trial_started_at = models.DateTimeField(null=True, blank=True)  # Trial start datetime
-    trial_used = models.BooleanField(default=False)  # Has trial been used/ended?
-    payment_method_token = models.CharField(max_length=255,blank=True, null=True)  # Token for payment method (e.g., Stripe token)
-    stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    trial_used = models.BooleanField(default=False)  # Whether the trial has been used
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name="+",
-        null=True,
-        blank=True
-    )
-    updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name="+",
-        null=True,
-        blank=True
-    )
+    # Payment & Subscription Information
+    payment_method_token = models.CharField(max_length=255, blank=True, null=True)  # Token for payment method (e.g., Stripe token)
+    stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)  # Stripe subscription ID
+    product_id = models.CharField(max_length=255, null=True, blank=True)  # Product ID
+    platform = models.CharField(max_length=255, null=True, blank=True)  # Platform where subscription was made (e.g., web, iOS, Android)
+    purchase_token = models.CharField(max_length=255, null=True, blank=True)  # Purchase token
+    transaction_id = models.CharField(max_length=255, null=True, blank=True)  # Transaction ID
+    original_transaction_id = models.CharField(max_length=255, null=True, blank=True)  # Original transaction ID
+    purchase_date = models.DateTimeField(null=True, blank=True)  # Purchase date
+
+    # Created/Updated info
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", null=True, blank=True)  # Created by
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", null=True, blank=True)  # Updated by
+    created_at = models.DateTimeField(auto_now_add=True)  # Date created
+    updated_at = models.DateTimeField(auto_now=True)  # Date updated
+
+
+    @transaction.atomic
+    def start_trial(self, days: int = 7, save: bool = True):
+        """
+        Start or restart the trial and set the `expires_at` field to trial expiration date.
+        """
+        if self.trial_used:
+            return False  # Trial already used
+
+        now = timezone.now()
+        self.trial_started_at = self.trial_started_at or now
+        self.expires_at = self.trial_started_at + timedelta(days=days)  # Set trial expiry in `expires_at`
+        self.status_is = "trial_active"  # Set the status when starting trial
+
+        # Save the necessary fields including status_is
+        if save:
+            self.save(update_fields=["trial_started_at", "expires_at", "status_is", "updated_at"])
+        return True
 
     def is_trial_active(self):
+        """
+        Check if the trial is still active using the `expires_at` field.
+        """
         if self.trial_started_at and not self.trial_used:
-            trial_end = self.trial_started_at + timezone.timedelta(days=7)
-            if timezone.now() <= trial_end:
-                return True  # ✅ trial is still active
-            else:
-                self.trial_used = True
-                self.save(update_fields=['trial_used'])  # ✅ mark it used
-        return False  # trial expired or already used
-
+            # Ensure that `expires_at` is not None
+            if self.expires_at and timezone.now() <= self.expires_at:  # `expires_at` should not be None
+                return True
+            # Trial expired
+            self.trial_used = True
+            self.save(update_fields=["trial_used", "updated_at"])  # Mark trial as used
+        return False  # Trial expired or already used
 
     def is_subscription_active(self):
-        """Check if subscription is currently active."""
-        if self.is_active and self.expires_at and self.expires_at > timezone.now():
-            return True
-        return False
+        """
+        Check if the subscription is currently active using the `expires_at` field.
+        """
+        # Handles cases where `expires_at` could be None or invalid
+        return self.is_active and self.expires_at and self.expires_at > timezone.now()
 
     def can_use_app(self):
-        """User can use app if trial OR subscription is active."""
+        """
+        Check if the user can use the app based on either the trial or subscription being active.
+        """
         return self.is_trial_active() or self.is_subscription_active()
+    def sync_status(self):
+        """Update the stored status_is field to match the calculated status."""
+        current_status = self.status
+        if self.status_is != current_status:
+            self.status_is = current_status
+            self.save(update_fields=["status_is", "updated_at"])
+        return self.status_is
+    @property
+    def status(self):
+        """
+        Return the subscription status: trial_active, subscription_active, or expired.
+        """
+        if self.is_subscription_active():
+            return "subscription_active"
+        elif self.is_trial_active():
+            return "trial_active"
+        return "expired"
 
     def __str__(self):
-        status = "Active" if self.can_use_app() else "Inactive"
-        return f"{self.user.email} Subscription - {status}"
+        return f"{self.user.email} Subscription - {'Active' if self.can_use_app() else 'Inactive'}"
 
 
 class ScanUsage(models.Model):
