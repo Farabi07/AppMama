@@ -220,7 +220,7 @@ REST_FRAMEWORK = {
 }
 FRONTEND_URL = 'http://10.0.70.128:5173/'
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Grocery Product Tracker API',
+    'TITLE': 'Task Mama API',
     'DESCRIPTION': '',
     'VERSION': '1.0.0',
     # OTHER SETTINGS

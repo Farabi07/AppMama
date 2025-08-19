@@ -788,6 +788,9 @@ class ChildListSerializer(serializers.ModelSerializer):
     updated_by = AdminUserMinimalListSerializer()
     # role = RoleMinimalListSerializer()
     designation = DesignationMinimalListSerializer()
+    class Meta:
+        model = Partner
+        fields = '__all__'
 class ChildSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     designation = serializers.CharField(source='designation.name', read_only=True)
