@@ -28,6 +28,7 @@ urlpatterns = [
     path('city/', include('authentication.urls.city_urls')),
     path('subscription/', include('authentication.urls.subscription_urls')),
     path('subscriptions_plan/', include('authentication.urls.subscriptions_plan_urls')),
+    path('ocr/', include('core.urls')),
 
 
 
