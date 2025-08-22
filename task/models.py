@@ -209,7 +209,7 @@ class Receipt(models.Model):
     time = models.CharField(max_length=5, blank=True, null=True)   # e.g., 02:06
     shop_name = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
-    payment_method = models.CharField(max_length=50, blank=True, null=True)
+    payment_method = models.CharField(max_length=100, blank=True, null=True)
 
     # For storing the items purchased
     items = models.JSONField(blank=True, null=True)  # List of dictionaries containing item info
