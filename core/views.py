@@ -5,7 +5,7 @@ from openai import OpenAI
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from task.models import Recipe
+from task.models import Recipe,Receipt
 # from task.serializers import ReceiptSerializer
 import json
 
