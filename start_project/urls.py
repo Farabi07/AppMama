@@ -28,7 +28,7 @@ urlpatterns = [
     path('city/', include('authentication.urls.city_urls')),
     path('subscription/', include('authentication.urls.subscription_urls')),
     path('subscriptions_plan/', include('authentication.urls.subscriptions_plan_urls')),
-    path('ocr/', include('core.urls')),
+    path('core/', include('core.urls')),
 
 
 
@@ -54,6 +54,6 @@ urlpatterns = [
 	re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.STATIC_ROOT}),
 ]
 #new
-# if settings.DEBUG:
-#     urlpatterns += static(settings.MEDIA_URL, document_root = settings.MEDIA_ROOT)
-#     urlpatterns += static(settings.STATIC_URL, document_root = settings.STATIC_URL)
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root = settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root = settings.STATIC_URL)
