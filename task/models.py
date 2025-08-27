@@ -21,7 +21,9 @@ class TaskCategory(models.Model):
     color_code = models.CharField(max_length=7, default='#3498db')  # Hex color
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='task_categories')
     is_default = models.BooleanField(default=False)
-    
+    class Meta:
+        ordering = ['-id']
+        verbose_name_plural = 'Task Categories'
     def __str__(self):
         return f"{self.name} ({self.get_category_type_display()})"
 
@@ -91,12 +93,13 @@ class Task(models.Model):
     
     class Meta:
         ordering = ['scheduled_date', 'scheduled_time', 'priority']
+        verbose_name_plural = 'Task'
         indexes = [
             models.Index(fields=['scheduled_date', 'created_by']),
             models.Index(fields=['assigned_user', 'status']),
             models.Index(fields=['priority', 'scheduled_date']),
         ]
-    
+
     def __str__(self):
         return f"{self.task_name} - {self.get_assigned_to_type_display()}"
     
@@ -231,7 +234,9 @@ class Receipt(models.Model):
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
-    
+    class Meta:
+        ordering = ['-id']
+        verbose_name_plural = 'Receipt'
     def __str__(self):
         return f"Receipt {self.id} - {self.shop_name} - {self.date}"
 

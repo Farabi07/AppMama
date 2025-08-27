@@ -14,11 +14,11 @@ import wave
 import threading
 import tempfile
 import os
-
+import openai
 warnings.filterwarnings("ignore")
 
-# 🔑 Initialize OpenAI client
-
+  # Use your actual API key here
+openai.api_key = os.getenv('OPENAI_API_KEY')
 # 🎙️ Voice Recording Configuration
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
@@ -119,7 +119,7 @@ class VoiceRecorder:
             
         try:
             with open(audio_file_path, 'rb') as audio_file:
-                transcript = client.audio.transcriptions.create(
+                transcript = openai.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     language="en"  # You can change this or remove to auto-detect
@@ -255,7 +255,7 @@ def analyze_mama_emotions(user_input):
             "{\"is_sad\": true/false, \"is_overwhelmed\": true/false, \"is_happy\": true/false, \"is_stressed\": true/false, \"sadness_score\": float, \"emotions\": {}}. "
             "Message: " + user_input
         )
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
@@ -382,7 +382,7 @@ def extract_tasks_from_text(user_input):
         f"Return a JSON array of ALL actionable tasks."
     )
     try:
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1024,
@@ -421,7 +421,7 @@ def extract_tasks_from_text(user_input):
 
 class DynamicTaskPrioritizer:
     def __init__(self):
-        self.openai_client = client
+        self.openai_openai = openai
 
     def analyze_task_priority(self, task_description, context=""):
         """
@@ -463,7 +463,7 @@ Only return valid JSON, no other text.
 """
         
         try:
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_openai.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task prioritization expert. Always return only valid JSON."},
@@ -538,7 +538,7 @@ Analyze the EXACT wording to determine who performs the task.
 """
         
         try:
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_openai.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task analysis expert. Return only valid JSON."},
@@ -582,7 +582,7 @@ Possible values for task_catagory:
 - "Recipy task"
 """
         try:
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_openai.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task categorization expert. Return only valid JSON."},
@@ -650,7 +650,7 @@ Format your response as a clear list of 3 recipes with names and detailed descri
 """
     
     try:
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful recipe expert. Create detailed, unique recipes using only the provided ingredients."},
@@ -837,7 +837,7 @@ def generate_task_analysis(user_input):
             f"Return only the short version as a string."
         )
         try:
-            response = client.chat.completions.create(
+            response = openai.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20,
@@ -931,7 +931,7 @@ def get_mama_response(user_input):
         
         add_to_conversation("user", user_input)
         
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=conversation_history,
             max_tokens=300,
