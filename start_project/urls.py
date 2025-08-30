@@ -22,12 +22,15 @@ urlpatterns = [
     path('permission/', include('authentication.urls.permission_urls')),
     path('role/', include('authentication.urls.role_urls')),
     path('designation/', include('authentication.urls.designation_urls')),
-    path('task/', include('task.urls.task_urls')),
     path('country/', include('authentication.urls.country_urls')),
     path('branch/', include('authentication.urls.branch_urls')),
     path('city/', include('authentication.urls.city_urls')),
     path('subscription/', include('authentication.urls.subscription_urls')),
     path('subscriptions_plan/', include('authentication.urls.subscriptions_plan_urls')),
+
+    # Task module
+    path('task/', include('task.urls.task_urls')),
+    path('recipe/', include('task.urls.recipe_urls')),
     path('core/', include('core.urls')),
 
 

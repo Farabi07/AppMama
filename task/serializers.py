@@ -15,12 +15,11 @@ from djoser import signals
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 
-
-class TaskListSerializer(serializers.ModelSerializer):
+class TaskCategoryListSerializer(serializers.ModelSerializer):
 	created_by = serializers.SerializerMethodField()
 	updated_by = serializers.SerializerMethodField()
 	class Meta:
-		model = Task
+		model = TaskCategory
 		fields = '__all__'
 
 	def get_created_by(self, obj):
@@ -29,18 +28,96 @@ class TaskListSerializer(serializers.ModelSerializer):
 	def get_updated_by(self, obj):
 		return obj.updated_by.email if obj.updated_by else obj.updated_by
 
+class TaskCategoryMinimalListSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = TaskCategory
+		fields = ['id', 'name']
 
 
+class TaskCategorySerializer(serializers.ModelSerializer):
+	class Meta:
+		model = TaskCategory
+		fields = '__all__'
+	
+	def create(self, validated_data):
+		modelObject = super().create(validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.created_by = user
+		modelObject.save()
+		return modelObject
+	
+	def update(self, instance, validated_data):
+		modelObject = super().update(instance=instance, validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.updated_by = user
+		modelObject.save()
+		return modelObject
+
+class TaskListSerializer(serializers.ModelSerializer):
+
+	created_by = serializers.SerializerMethodField()
+	updated_by = serializers.SerializerMethodField()
+	class Meta:
+		model = Task
+		fields = '__all__'
+	def get_created_by(self, obj):
+		return obj.created_by.email if obj.created_by else obj.created_by
+		
+	def get_updated_by(self, obj):
+		return obj.updated_by.email if obj.updated_by else obj.updated_by
 
 class TaskMinimalListSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Task
 		fields = ['id', 'name']
 
-
 class TaskSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Task
+		fields = '__all__'
+	
+	def create(self, validated_data):
+		modelObject = super().create(validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.created_by = user
+		modelObject.save()
+		return modelObject
+	
+	def update(self, instance, validated_data):
+		modelObject = super().update(instance=instance, validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.updated_by = user
+		modelObject.save()
+		return modelObject
+	
+class RecipeListSerializer(serializers.ModelSerializer):
+	task_category = serializers.SerializerMethodField()
+	created_by = serializers.SerializerMethodField()
+	updated_by = serializers.SerializerMethodField()
+	class Meta:
+		model = Recipe
+		fields = '__all__'
+	def get_task_category(self, obj):
+		return obj.task_category.name if obj.task_category else obj.task_category
+	def get_created_by(self, obj):
+		return obj.created_by.email if obj.created_by else obj.created_by
+		
+	def get_updated_by(self, obj):
+		return obj.updated_by.email if obj.updated_by else obj.updated_by
+
+class RecipeMinimalListSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Recipe
+		fields = ['id', 'name']
+
+
+class RecipeSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Recipe
 		fields = '__all__'
 	
 	def create(self, validated_data):

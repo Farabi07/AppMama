@@ -13,6 +13,7 @@ class TaskCategory(models.Model):
         ('education', 'Education'),
         ('household', 'Household'),
         ('recipe', 'Recipe'),
+         ('normal_task', 'Normal task'),
         ('other', 'Other')
     ]
     
@@ -54,6 +55,7 @@ class Task(models.Model):
     
     # Core task fields matching AI response
     task_name = models.CharField(max_length=200)
+    task_category = models.CharField(max_length=200,null=True,blank=True)
     description = models.TextField(blank=True, null=True)
     
     # Time and date fields
@@ -64,8 +66,7 @@ class Task(models.Model):
     # Assignment and categorization
     assigned_to_type = models.CharField(max_length=20, choices=ASSIGNED_TO_CHOICES)
     assigned_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True, related_name='assigned_tasks')
-    task_category = models.ForeignKey('TaskCategory', on_delete=models.SET_NULL, null=True, blank=True)
-    
+    # task_category = models.ForeignKey('TaskCategory', on_delete=models.SET_NULL, null=True, blank=True)
     # Priority and status
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
@@ -85,6 +86,8 @@ class Task(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     completed_at = models.DateTimeField(blank=True, null=True)
     
     # Recurring task support
@@ -101,7 +104,7 @@ class Task(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.task_name} - {self.get_assigned_to_type_display()}"
+        return f"{self.task_name} - {self.task_category if self.task_category else 'No category'}"
     
     @property
     def is_overdue(self):
@@ -164,19 +167,10 @@ class TaskAttachment(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     
-# Recipe-specific model for meal planning tasks
+
 class Recipe(models.Model):
-    """Recipe model for meal planning tasks"""
-    MEAL_TYPES = [
-        ('breakfast', 'Breakfast'),
-        ('brunch', 'Brunch'),
-        ('lunch', 'Lunch'),
-        ('dinner', 'Dinner'),
-        ('snack', 'Snack')
-    ]
-    
-    name = models.CharField(max_length=200)
-    meal_type = models.CharField(max_length=20, choices=MEAL_TYPES)
+    name = models.CharField(max_length=200, null=True, blank=True)
+    meal_type = models.CharField(max_length=200, null=True, blank=True)
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='recipes')
     
     # Ingredients and instructions
@@ -199,7 +193,7 @@ class Recipe(models.Model):
     
     
     def __str__(self):
-        return f"{self.name} - {self.get_meal_type_display()}"
+        return f"{self.name} - {self.meal_type}" 
 
 class Receipt(models.Model):
     # Basic information from the receipt

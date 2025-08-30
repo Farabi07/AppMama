@@ -14,11 +14,12 @@ import wave
 import threading
 import tempfile
 import os
-import openai
+
 warnings.filterwarnings("ignore")
 
-  # Use your actual API key here
-openai.api_key = os.getenv('OPENAI_API_KEY')
+# 🔑 Initialize OpenAI client
+client = OpenAI(api_key="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")  # Use your actual API key here
+
 # 🎙️ Voice Recording Configuration
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
@@ -119,7 +120,7 @@ class VoiceRecorder:
             
         try:
             with open(audio_file_path, 'rb') as audio_file:
-                transcript = openai.audio.transcriptions.create(
+                transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     language="en"  # You can change this or remove to auto-detect
@@ -255,7 +256,7 @@ def analyze_mama_emotions(user_input):
             "{\"is_sad\": true/false, \"is_overwhelmed\": true/false, \"is_happy\": true/false, \"is_stressed\": true/false, \"sadness_score\": float, \"emotions\": {}}. "
             "Message: " + user_input
         )
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
@@ -382,7 +383,7 @@ def extract_tasks_from_text(user_input):
         f"Return a JSON array of ALL actionable tasks."
     )
     try:
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1024,
@@ -421,7 +422,7 @@ def extract_tasks_from_text(user_input):
 
 class DynamicTaskPrioritizer:
     def __init__(self):
-        self.openai_openai = openai
+        self.openai_client = client
 
     def analyze_task_priority(self, task_description, context=""):
         """
@@ -463,7 +464,7 @@ Only return valid JSON, no other text.
 """
         
         try:
-            response = self.openai_openai.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task prioritization expert. Always return only valid JSON."},
@@ -538,7 +539,7 @@ Analyze the EXACT wording to determine who performs the task.
 """
         
         try:
-            response = self.openai_openai.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task analysis expert. Return only valid JSON."},
@@ -556,9 +557,9 @@ Analyze the EXACT wording to determine who performs the task.
             print(f"Error in responsibility analysis: {e}")
             return "Self"
 
-    def analyze_task_category(self, task_description, context=""):
+    def analyze_task_catagory(self, task_description, context=""):
         """
-        Use AI to determine the task_category: Normal task, Health task, or Recipy task.
+        Use AI to determine the task_catagory: Normal task, Health task, or Recipy task.
         Only assign 'Recipy task' if the user explicitly asks for a recipe.
         """
         prompt = f"""
@@ -573,16 +574,16 @@ CONTEXT: "{context}"
 
 Return ONLY this JSON format:
 {{
-    "task_category": "Normal task"
+    "task_catagory": "Normal task"
 }}
 
-Possible values for task_category:
+Possible values for task_catagory:
 - "Normal task"
 - "Health task"
 - "Recipy task"
 """
         try:
-            response = self.openai_openai.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a task categorization expert. Return only valid JSON."},
@@ -595,7 +596,7 @@ Possible values for task_category:
             if result_text.startswith("```json"):
                 result_text = result_text.replace("```json", "").replace("```", "").strip()
             cat_data = json.loads(result_text)
-            return cat_data.get("task_category", "Normal task")
+            return cat_data.get("task_catagory", "Normal task")
         except Exception as e:
             print(f"Error in catagory analysis: {e}")
             return "Normal task"
@@ -650,7 +651,7 @@ Format your response as a clear list of 3 recipes with names and detailed descri
 """
     
     try:
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful recipe expert. Create detailed, unique recipes using only the provided ingredients."},
@@ -744,7 +745,7 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
 
         return {
             "meal_type": meal_type,
-            "task_category": "Recipy task",
+            "task_catagory": "Recipy task",
             "time": now.strftime('%I:%M %p'),
             "date": now.strftime('%Y-%m-%d'),
             "items_available": available_items,
@@ -805,7 +806,7 @@ def create_smart_recipe_from_ingredients(available_items, now, meal_type):
     
     return {
         "meal_type": meal_type,
-        "task_category": "Recipy task",
+        "task_catagory": "Recipy task",
         "time": now.strftime('%I:%M %p'),
         "date": now.strftime('%Y-%m-%d'),
         "items_available": available_items,
@@ -837,7 +838,7 @@ def generate_task_analysis(user_input):
             f"Return only the short version as a string."
         )
         try:
-            response = openai.chat.completions.create(
+            response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20,
@@ -859,7 +860,7 @@ def generate_task_analysis(user_input):
             t["task_name"],
             context=f"Other tasks: {all_task_descriptions}"
         )
-        task_category = prioritizer.analyze_task_category(
+        task_catagory = prioritizer.analyze_task_catagory(
             t["task_name"],
             context=f"Other tasks: {all_task_descriptions}"
         )
@@ -871,7 +872,7 @@ def generate_task_analysis(user_input):
             "task_assigned": task_assigned,
             "priority": priority_data["priority_level"],
             "priority_score": priority_data.get("priority_score", 5.0),
-            "task_category": task_category
+            "task_catagory": task_catagory
         })
 
     # For each time slot, sort tasks by priority_score and assign priorities
@@ -899,7 +900,7 @@ def generate_task_analysis(user_input):
                 "date": task["date"],
                 "task_assigned": task["task_assigned"],
                 "priority": final_priority,
-                "task_category": task["task_category"]
+                "task_catagory": task["task_catagory"]
             })
 
     # Sort tasks by date, then time, then priority
@@ -931,7 +932,7 @@ def get_mama_response(user_input):
         
         add_to_conversation("user", user_input)
         
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=conversation_history,
             max_tokens=300,

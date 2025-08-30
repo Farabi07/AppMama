@@ -40,7 +40,7 @@ def convert_to_24hr_format(time_str):
         return time_obj.strftime("%H:%M")  # %H is 24-hour format
     except ValueError:
         raise ValueError(f"Invalid time format: {time_str}")
-    
+
 @csrf_exempt
 @permission_classes([IsAuthenticated])  # Ensure user is authenticated
 @api_view(['POST'])  # Ensure this is a POST request
@@ -52,181 +52,161 @@ def handle_task_mama_request(request):
     - Recipe suggestions
     - Emotional support
     """
-    if request.method == 'POST':
-        # Check if the user is authenticated
-        if not request.user.is_authenticated:
-            return JsonResponse({"error": "User must be authenticated."}, status=403)
+    if request.method != 'POST':
+        return JsonResponse({"error": "Invalid HTTP method. Use POST."}, status=405)
 
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "User must be authenticated."}, status=403)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON format"}, status=400)
+
+    input_mode = data.get('input_mode')
+    user_input = data.get('user_input')
+
+    if not input_mode or not user_input:
+        return JsonResponse({"error": "Both input mode and user input are required."}, status=400)
+
+    user = request.user  # Authenticated user
+
+    # Handle Text input
+    if input_mode == 'text':
+        # 1. Task Planning
+        if detect_task_planning_request(user_input):
+            response = {
+                "response": "I'd love to help you organize your day! 📋✨ Please tell me about all the tasks you need to do, and I'll create a beautiful schedule for you."
+            }
+            return JsonResponse(response, status=200)
+
+        # 2. Recipe Request (asking for ingredients)
+        elif detect_recipe_request(user_input):
+            response = {
+                "response": "I'd love to help you with some delicious recipe ideas! 🍳✨ What items do you have available in your pantry, kitchen, home, or fridge?"
+            }
+            return JsonResponse(response, status=200)
+
+        # 3. Recipe Ingredient Response (user provides ingredients)
+        elif user_input:  # implement this detection
+            available_items = user_input
+            recipe_suggestions = generate_recipy_suggestion(available_items)
+
+            if recipe_suggestions and "recipy" in recipe_suggestions:
+                # Create a new task for the recipe
+                task = Task.objects.create(
+                    task_name="Generated Recipe Task",
+                    description="Generated based on AI recipe suggestions.",
+                    scheduled_date=timezone.now().date(),
+                    scheduled_time=None,
+                    assigned_to_type="self",
+                    assigned_user=user,
+                    task_category=None,
+                    priority="medium",
+                    status="pending",
+                    created_by=user,
+                )
+
+                # Save the recipes for the new task
+                save_recipe_from_ai_response(recipe_suggestions, task)
+
+                # Return detailed recipe suggestions
+                formatted_recipe_response = {
+                    "meal_type": recipe_suggestions.get("meal_type", "Other meal"),
+                    "task_category": recipe_suggestions.get("task_category", "Recipe task"),
+                    "time": recipe_suggestions.get("time", "Not specified"),
+                    "date": recipe_suggestions.get("date", str(timezone.now().date())),
+                    "items_available": recipe_suggestions.get("items_available", ""),
+                    "items_needed": recipe_suggestions.get("items_needed", ""),
+                    "recipy_name": recipe_suggestions.get("recipy_name", []),
+                    "recipy": recipe_suggestions.get("recipy", [])
+                }
+
+                return JsonResponse(formatted_recipe_response, status=200)
+            else:
+                return JsonResponse({"error": "Could not generate recipes with the provided ingredients."}, status=400)
+
+        # 4. Task Details input (normal tasks)
+        elif input_mode(user_input):
+            task_analysis = generate_task_analysis(user_input)
+            if isinstance(task_analysis, dict) and task_analysis.get('tasks'):
+                for task_data in task_analysis.get('tasks'):
+                    task_time = task_data.get('time', '')
+                    task_data['time'] = convert_to_24hr_format(task_time) if task_time and task_time != "Not specified" else None
+                    save_task_from_ai_response(task_data, user)
+                return JsonResponse(task_analysis, status=200)
+            else:
+                return JsonResponse({"error": "Could not extract tasks. Please try to be more specific."}, status=400)
+
+        # 5. Emotional Support
+        emotions = analyze_mama_emotions(user_input)
+        if emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False):
+            response = {
+                "response": "I can sense you might not be feeling your best right now. 💕 Would you like a pep talk to motivate you Mama 💖 (yes/no)?"
+            }
+            save_emotional_support(user_input, response)
+            return JsonResponse(response, status=200)
+
+        # 6. Pep Talk Request
+        if wants_pep_talk(user_input):
+            pep_talk_response = {
+                "response": "You're doing great, Mama! You have so much strength, and you're capable of amazing things! Keep going 💖💪"
+            }
+            save_emotional_support(user_input, pep_talk_response)
+            return JsonResponse(pep_talk_response, status=200)
+
+        # 7. Happy Emotions
+        elif emotions['is_happy']:
+            return JsonResponse({"response": "I'm glad to hear you're feeling happy! 💖🌸"}, status=200)
+
+        # 8. Normal AI Conversation
+        response = get_mama_response(user_input)
+        return JsonResponse({"response": response}, status=200)
+
+    # Handle Voice input
+    elif input_mode == 'voice':
         try:
-            # Parse JSON from the request body
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON format"}, status=400)
+            user_input, status = get_user_input('voice')
 
-        # Extract input_mode and user_input from the request data
-        input_mode = data.get('input_mode')
-        user_input = data.get('user_input')
+            if status == 'timeout':
+                return JsonResponse({"error": "Voice input timed out. No input received."}, status=408)
+            elif status == 'interrupted':
+                return JsonResponse({"error": "Voice recording interrupted."}, status=500)
+            elif status == 'empty':
+                return JsonResponse({"error": "No voice input detected."}, status=400)
+            elif status == 'error':
+                return JsonResponse({"error": "Error processing the voice input."}, status=500)
 
-        if not input_mode or not user_input:
-            return JsonResponse({"error": "Both input mode and user input are required."}, status=400)
+            response = chat_with_task_mama(user_input)
+            return JsonResponse(response, status=200)
 
-        # Now, make sure we pass the authenticated user when saving data
-        user = request.user  # Ensure this is the authenticated user
-
-        # Handle Text input for Task Mama AI (Normal conversation)
-        if input_mode == 'text':
-            # Handle Task Planning (e.g., "Plan my day")
-            if detect_task_planning_request(user_input):
-                task_analysis = generate_task_analysis(user_input)
-
-                if isinstance(task_analysis, dict) and task_analysis.get('tasks'):
-                    # Save tasks to the database
-                    for task_data in task_analysis.get('tasks'):
-                        # Check if time is "Not specified" or invalid
-                        task_time = task_data.get('time', '')
-                        if task_time and task_time != "Not specified":
-                            task_data['time'] = convert_to_24hr_format(task_time)
-                        else:
-                            task_data['time'] = None  # Set to None or default value
-
-                        save_task_from_ai_response(task_data, user)
-
-                    return JsonResponse(task_analysis, status=200)
-                else:
-                    return JsonResponse({"error": "Could not extract tasks. Please try to be more specific."}, status=400)
-
-            # Handle Recipe Request (e.g., "suggest me a recipe for lunch")
-            elif detect_recipe_request(user_input):
-                # Respond with a prompt asking for available ingredients
-                response = {
-                    "response": "I'd love to help you with some delicious recipe ideas! 🍳✨ What items do you have available in your pantry, kitchen, home, or fridge?"
-                }
-                return JsonResponse(response, status=200)
-
-            # Handle Recipe Ingredient Response (User provides ingredients)
-            elif user_input:
-                available_items = user_input  # assuming user_input has the ingredients in text form
-                recipe_suggestions = generate_recipy_suggestion(available_items)
-
-                if recipe_suggestions and "recipy" in recipe_suggestions:
-                    # Create a new task for the recipe
-                    task = Task.objects.create(
-                        task_name="Generated Recipe Task",  # Default task name
-                        description="Generated based on AI recipe suggestions.",
-                        scheduled_date=timezone.now().date(),
-                        scheduled_time=None,
-                        assigned_to_type="self",  # Default to self
-                        assigned_user=user,  # Link to the authenticated user
-                        task_category=None,  # Default category
-                        priority="medium",
-                        status="pending",
-                        created_by=user,  # User who created the task
-                    )
-
-                    # Save the recipes for the new task
-                    save_recipe_from_ai_response(recipe_suggestions, task)
-
-                    # Return detailed recipe suggestions
-                    formatted_recipe_response = {
-                        "meal_type": recipe_suggestions.get("meal_type", "Other meal"),
-                        "task_category": recipe_suggestions.get("task_category", "Recipe task"),
-                        "time": recipe_suggestions.get("time", "Not specified"),
-                        "date": recipe_suggestions.get("date", str(timezone.now().date())),
-                        "items_available": recipe_suggestions.get("items_available", ""),
-                        "items_needed": recipe_suggestions.get("items_needed", ""),
-                        "recipy_name": recipe_suggestions.get("recipy_name", []),
-                        "recipy": recipe_suggestions.get("recipy", [])
-                    }
-
-                    return JsonResponse(formatted_recipe_response, status=200)
-                else:
-                    return JsonResponse({"error": "Could not generate recipes with the provided ingredients."}, status=400)
-
-            # Handle Emotional Support (e.g., "I'm feeling overwhelmed")
-            emotions = analyze_mama_emotions(user_input)
-            if emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False):
-                response = {
-                    "response": "I can sense you might not be feeling your best right now. 💕 Would you like a pep talk to motivate you Mama 💖 (yes/no)?"
-                }
-                save_emotional_support(user_input, response)
-                return JsonResponse(response, status=200)
-
-            # Check if user wants a pep talk
-            if wants_pep_talk(user_input):  # Use the imported function here
-                pep_talk_response = {
-                    "response": "You're doing great, Mama! You have so much strength, and you're capable of amazing things! Keep going 💖💪"
-                }
-                save_emotional_support(user_input, pep_talk_response)
-                return JsonResponse(pep_talk_response, status=200)
-
-            elif emotions['is_happy']:
-                response = {
-                    "response": "I'm glad to hear you're feeling happy! 💖🌸"
-                }
-                return JsonResponse(response, status=200)
-
-            # Provide Normal AI Conversation
-            response = get_mama_response(user_input)
-            return JsonResponse({"response": response}, status=200)
-
-        # Handle Voice input (Converts voice to text and processes)
-        elif input_mode == 'voice':
-            try:
-                # Get voice input from the user
-                user_input, status = get_user_input('voice')
-
-                # Handle different voice input statuses
-                if status == 'timeout':
-                    return JsonResponse({"error": "Voice input timed out. No input received."}, status=408)
-                elif status == 'interrupted':
-                    return JsonResponse({"error": "Voice recording interrupted."}, status=500)
-                elif status == 'empty':
-                    return JsonResponse({"error": "No voice input detected."}, status=400)
-                elif status == 'error':
-                    return JsonResponse({"error": "Error processing the voice input."}, status=500)
-
-                # If voice input was successfully recorded and transcribed, get the response
-                response = chat_with_task_mama(user_input)
-                return JsonResponse(response, status=200)
-
-            except Exception as e:
-                return JsonResponse({"error": f"Error processing voice input: {str(e)}"}, status=500)
-
-        else:
-            return JsonResponse({"error": "Invalid input mode. Use 'text' or 'voice'."}, status=400)
+        except Exception as e:
+            return JsonResponse({"error": f"Error processing voice input: {str(e)}"}, status=500)
 
     else:
-        return JsonResponse({"error": "Invalid HTTP method. Use POST."}, status=405)
+        return JsonResponse({"error": "Invalid input mode. Use 'text' or 'voice'."}, status=400)
 
 
 # Function to save tasks into the database
 def save_task_from_ai_response(task_data, user):
     """Save task data into the database."""
-    
-    # Get or create the task category based on the task_category in response
-    category_name = task_data.get('task_category', 'Other')
-    task_category, created = TaskCategory.objects.get_or_create(
-        name=category_name,
-        created_by=user
-    )
-    
-    # Create a new task instance
+
+    # Create a new task instance, where the category is directly saved as a string
     task = Task.objects.create(
         task_name=task_data.get('task_name'),
         description=task_data.get('description', ''),
         scheduled_date=task_data.get('date'),
         scheduled_time=task_data.get('time', None),
         assigned_to_type=task_data.get('task_assigned'),
-        assigned_user=user,  # Assuming the task is assigned to the user who created it
-        task_category=task_category,
+        assigned_user=user,  # Link to the authenticated user
+        task_category=task_data.get('task_category', 'Other') ,  # Store category as a string
         priority=task_data.get('priority', 'medium'),
         status='pending',
-        created_by=user,  # User who created the task
+        created_by=user  # User who created the task
     )
-    
+    print(f"Task '{task.task_category}' saved successfully.")
     # Return the saved task object
     return task
-
 
 # Function to save recipe data into the database
 def save_recipe_from_ai_response(recipe_data, task):
