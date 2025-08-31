@@ -172,7 +172,7 @@ class Recipe(models.Model):
     name = models.CharField(max_length=200, null=True, blank=True)
     meal_type = models.CharField(max_length=200, null=True, blank=True)
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='recipes')
-    
+    recipy_name = models.JSONField(null=True, blank=True)
     # Ingredients and instructions
     items_available = models.TextField()
     items_needed = models.TextField(blank=True, null=True)

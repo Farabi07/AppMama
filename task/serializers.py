@@ -119,7 +119,9 @@ class RecipeSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Recipe
 		fields = '__all__'
-	
+		extra_kwargs = {
+            'meal_type': {'required': False, 'allow_blank': True, 'allow_null': True}
+        }
 	def create(self, validated_data):
 		modelObject = super().create(validated_data=validated_data)
 		user = get_current_authenticated_user()

@@ -609,6 +609,7 @@ def get_meal_type_from_conversation(user_input):
     user_input_lower = user_input.lower()
     for meal in meal_types:
         if meal in user_input_lower:
+            print(f"Detected meal type: {meal}")
             return meal.capitalize()
     return "Other meal"
 
@@ -700,13 +701,22 @@ def explain_cooking_terms(text):
                 explained.add(term)
     return text
 
-def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
+
+
+import re
+
+def parse_ai_recipe_response(ai_response, available_items, now, fallback_meal_type="Other meal"):
     """
-    Parse AI response and convert to our JSON format, always prefixing each recipe with 'Recipe 1:', 'Recipe 2:', etc.
-    Also explain difficult cooking terms in the recipe text.
+    Parse AI response and convert to our JSON format, always prefixing each recipe 
+    with 'Recipe 1:', 'Recipe 2:', etc. Also explain difficult cooking terms.
     """
+
     try:
-        # Split response into sections for each recipe
+        # --- Extract meal type from AI response ---
+        match = re.search(r"meal type[:\-]?\s*([A-Za-z]+)", ai_response, re.IGNORECASE)
+        meal_type = match.group(1).capitalize() if match else fallback_meal_type
+
+        # --- Parse recipes ---
         lines = ai_response.split('\n')
         recipes = []
         recipe_names = []
@@ -716,7 +726,7 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
 
         for line in lines:
             line = line.strip()
-            if 'Recipe 1:' in line or 'Recipe 2:' in line or 'Recipe 3:' in line:
+            if re.match(r"^Recipe\s+\d+:", line, re.IGNORECASE):
                 if current_recipe and current_name:
                     recipe_count += 1
                     explained_recipe = explain_cooking_terms(current_recipe.strip())
@@ -724,7 +734,7 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
                     recipe_names.append(current_name.strip())
                 current_name = line
                 current_recipe = ""
-            elif line and not line.startswith('Recipe'):
+            elif line and not line.startswith("Recipe"):
                 current_recipe += line + " "
 
         # Add the last recipe
@@ -734,7 +744,7 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
             recipes.append(f"Recipe {recipe_count}: {explained_recipe}")
             recipe_names.append(current_name.strip())
 
-        # Ensure we have exactly 3 recipes
+        # Ensure exactly 3 recipes
         while len(recipes) < 3:
             recipe_count += 1
             fallback = "Cook the available ingredients together with seasonings until tender. Adjust cooking time based on ingredients used."
@@ -754,7 +764,9 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
         }
 
     except Exception:
-        return create_smart_recipe_from_ingredients(available_items, now, meal_type)
+        return create_smart_recipe_from_ingredients(available_items, now, fallback_meal_type)
+
+
 
 def create_smart_recipe_from_ingredients(available_items, now, meal_type):
     """

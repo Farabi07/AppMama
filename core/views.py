@@ -22,6 +22,8 @@ from .ai import (
     detect_recipe_request,
     generate_task_analysis,
     generate_recipy_suggestion,
+    get_meal_type_from_conversation,
+
     analyze_mama_emotions,
     wants_pep_talk
 )
@@ -88,10 +90,11 @@ def handle_task_mama_request(request):
             return JsonResponse(response, status=200)
 
         # 3. Recipe Ingredient Response (user provides ingredients)
+        # 3. Recipe Ingredient Response (user provides ingredients)
         elif user_input:  # implement this detection
             available_items = user_input
-            recipe_suggestions = generate_recipy_suggestion(available_items)
-
+            recipe_suggestions = generate_recipy_suggestion(available_items, user_input)
+            print (recipe_suggestions)
             if recipe_suggestions and "recipy" in recipe_suggestions:
                 # Create task data structure that matches what save_task_from_ai_response expects
                 task_data = {
@@ -100,17 +103,14 @@ def handle_task_mama_request(request):
                     'date': recipe_suggestions.get("date", str(timezone.now().date())),
                     'time': recipe_suggestions.get("time"),
                     'task_assigned': 'self',
-                    'task_category': recipe_suggestions.get("task_category", "Recipe task"),  # Use the category from AI response
+                    'task_category': recipe_suggestions.get("task_category", "Recipe task"),
                     'priority': 'medium'
                 }
                 
-                # Use the existing function to save the task properly
+                # Save task and recipes
                 task = save_task_from_ai_response(task_data, user)
-
-                # Save the recipes for the new task
                 save_recipe_from_ai_response(recipe_suggestions, task)
 
-                # Return detailed recipe suggestions
                 formatted_recipe_response = {
                     "meal_type": recipe_suggestions.get("meal_type", "Other meal"),
                     "task_category": recipe_suggestions.get("task_category", "Recipe task"),
@@ -125,7 +125,6 @@ def handle_task_mama_request(request):
                 return JsonResponse(formatted_recipe_response, status=200)
             else:
                 return JsonResponse({"error": "Could not generate recipes with the provided ingredients."}, status=400)
-
         # 4. Task Details input (normal tasks)
         elif input_mode(user_input):
             task_analysis = generate_task_analysis(user_input)
