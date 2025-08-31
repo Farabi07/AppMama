@@ -93,19 +93,19 @@ def handle_task_mama_request(request):
             recipe_suggestions = generate_recipy_suggestion(available_items)
 
             if recipe_suggestions and "recipy" in recipe_suggestions:
-                # Create a new task for the recipe
-                task = Task.objects.create(
-                    task_name="Generated Recipe Task",
-                    description="Generated based on AI recipe suggestions.",
-                    scheduled_date=timezone.now().date(),
-                    scheduled_time=None,
-                    assigned_to_type="self",
-                    assigned_user=user,
-                    task_category=None,
-                    priority="medium",
-                    status="pending",
-                    created_by=user,
-                )
+                # Create task data structure that matches what save_task_from_ai_response expects
+                task_data = {
+                    'task_name': 'Generated Recipe Task',
+                    'description': 'Generated based on AI recipe suggestions.',
+                    'date': recipe_suggestions.get("date", str(timezone.now().date())),
+                    'time': recipe_suggestions.get("time"),
+                    'task_assigned': 'self',
+                    'task_category': recipe_suggestions.get("task_category", "Recipe task"),  # Use the category from AI response
+                    'priority': 'medium'
+                }
+                
+                # Use the existing function to save the task properly
+                task = save_task_from_ai_response(task_data, user)
 
                 # Save the recipes for the new task
                 save_recipe_from_ai_response(recipe_suggestions, task)
@@ -190,16 +190,32 @@ def handle_task_mama_request(request):
 # Function to save tasks into the database
 def save_task_from_ai_response(task_data, user):
     """Save task data into the database."""
+    
+    # Parse the date if it's a string
+    scheduled_date = task_data.get('date')
+    if isinstance(scheduled_date, str):
+        try:
+            scheduled_date = datetime.strptime(scheduled_date, '%Y-%m-%d').date()
+        except ValueError:
+            scheduled_date = timezone.now().date()
+    
+    # Parse the time if it's a string
+    scheduled_time = task_data.get('time')
+    if isinstance(scheduled_time, str) and scheduled_time != "Not specified":
+        try:
+            scheduled_time = datetime.strptime(scheduled_time, '%I:%M %p').time()
+        except ValueError:
+            scheduled_time = None
 
     # Create a new task instance, where the category is directly saved as a string
     task = Task.objects.create(
         task_name=task_data.get('task_name'),
         description=task_data.get('description', ''),
-        scheduled_date=task_data.get('date'),
-        scheduled_time=task_data.get('time', None),
+        scheduled_date=scheduled_date,
+        scheduled_time=scheduled_time,
         assigned_to_type=task_data.get('task_assigned'),
         assigned_user=user,  # Link to the authenticated user
-        task_category=task_data.get('task_category', 'Other') ,  # Store category as a string
+        task_category=task_data.get('task_category', 'Other'),  # Store category as a string
         priority=task_data.get('priority', 'medium'),
         status='pending',
         created_by=user  # User who created the task
