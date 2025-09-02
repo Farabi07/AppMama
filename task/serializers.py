@@ -137,3 +137,85 @@ class RecipeSerializer(serializers.ModelSerializer):
 			modelObject.updated_by = user
 		modelObject.save()
 		return modelObject
+	
+
+class ClientListSerializer(serializers.ModelSerializer):
+	created_by = serializers.SerializerMethodField()
+	updated_by = serializers.SerializerMethodField()
+	class Meta:
+		model = Client
+		fields = '__all__'
+
+	def get_created_by(self, obj):
+		return obj.created_by.email if obj.created_by else obj.created_by
+		
+	def get_updated_by(self, obj):
+		return obj.updated_by.email if obj.updated_by else obj.updated_by
+
+class ClientMinimalListSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Client
+		fields = ['id', 'name']
+
+
+class ClientSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Client
+		fields = '__all__'
+	
+	def create(self, validated_data):
+		modelObject = super().create(validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.created_by = user
+		modelObject.save()
+		return modelObject
+	
+	def update(self, instance, validated_data):
+		modelObject = super().update(instance=instance, validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.updated_by = user
+		modelObject.save()
+		return modelObject
+	
+
+class ReceiptListSerializer(serializers.ModelSerializer):
+	created_by = serializers.SerializerMethodField()
+	updated_by = serializers.SerializerMethodField()
+	class Meta:
+		model = Receipt
+		fields = '__all__'
+
+	def get_created_by(self, obj):
+		return obj.created_by.email if obj.created_by else obj.created_by
+		
+	def get_updated_by(self, obj):
+		return obj.updated_by.email if obj.updated_by else obj.updated_by
+
+class ReceiptMinimalListSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Receipt
+		fields = ['id', 'name']
+
+
+class ReceiptSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Receipt
+		fields = '__all__'
+	
+	def create(self, validated_data):
+		modelObject = super().create(validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.created_by = user
+		modelObject.save()
+		return modelObject
+	
+	def update(self, instance, validated_data):
+		modelObject = super().update(instance=instance, validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.updated_by = user
+		modelObject.save()
+		return modelObject

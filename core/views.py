@@ -7,7 +7,9 @@ from task.models import *
 # from task.serializers import ReceiptSerializer
 from rest_framework.decorators import api_view, permission_classes
 from datetime import datetime
-import openai
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from rest_framework.parsers import MultiPartParser, FormParser,JSONParser
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -32,7 +34,6 @@ from .ai import (
 voice_recorder = VoiceRecorder()
 
 # --- OpenAI config ---
-openai.api_key = os.getenv("OPENAI_API_KEY")
 from datetime import datetime
 
 def convert_to_24hr_format(time_str):
@@ -89,7 +90,7 @@ def handle_task_mama_request(request):
             }
             return JsonResponse(response, status=200)
 
-        
+
         # 3. Recipe Ingredient Response (user provides ingredients)
         elif user_input:  # implement this detection
             available_items = user_input
@@ -106,7 +107,7 @@ def handle_task_mama_request(request):
                     'task_category': recipe_suggestions.get("task_category", "Recipe task"),
                     'priority': 'medium'
                 }
-                
+
                 # Save task and recipes
                 task = save_task_from_ai_response(task_data, user)
                 save_recipe_from_ai_response(recipe_suggestions, task)
@@ -189,7 +190,7 @@ def handle_task_mama_request(request):
 # Function to save tasks into the database
 def save_task_from_ai_response(task_data, user):
     """Save task data into the database."""
-    
+
     # Parse the date if it's a string
     scheduled_date = task_data.get('date')
     if isinstance(scheduled_date, str):
@@ -197,7 +198,7 @@ def save_task_from_ai_response(task_data, user):
             scheduled_date = datetime.strptime(scheduled_date, '%Y-%m-%d').date()
         except ValueError:
             scheduled_date = timezone.now().date()
-    
+
     # Parse the time if it's a string
     scheduled_time = task_data.get('time')
     if isinstance(scheduled_time, str) and scheduled_time != "Not specified":
@@ -226,7 +227,7 @@ def save_task_from_ai_response(task_data, user):
 # Function to save recipe data into the database
 def save_recipe_from_ai_response(recipe_data, task):
     """Save recipe suggestions to the database."""
-    
+
     # Iterate over each recipe in the response
     for idx, recipe_name in enumerate(recipe_data.get('recipy_name', [])):
         # Create a new recipe instance
@@ -244,7 +245,7 @@ def save_recipe_from_ai_response(recipe_data, task):
             serving_suggestion=recipe_data.get('serving_suggestion', ''),
             created_by=task.created_by
         )
-    
+
     return recipe
 
 
@@ -255,7 +256,7 @@ def save_emotional_support(user_input, response):
     TaskComment.objects.create(
         task=None,  # You can link this to a specific task if needed
         user=None,  # Link this to the user who requested emotional support
-        comment=user_input + "\n\n" + response["response"],
+        comment=user_input + "\n\n" + response.response,
         created_at=timezone.now(),
     )
 
@@ -311,17 +312,36 @@ class ReceiptUploadView(APIView):
     def extract_text_from_local_image(self, image_path):
         textract_client = boto3.client(
             'textract',
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),  # AWS keys should also be set via environment variables.
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),  # AWS keys should be set via environment variables
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
             region_name=os.getenv("AWS_REGION")
         )
+        
         with open(image_path, 'rb') as img_file:
             img_bytes = img_file.read()
 
-        response = textract_client.detect_document_text(Document={'Bytes': img_bytes})
+        try:
+            # Requesting text extraction from the image
+            response = textract_client.detect_document_text(Document={'Bytes': img_bytes})
 
-        lines = [block['Text'] for block in response['Blocks'] if block['BlockType'] == 'LINE']
-        return '\n'.join(lines)
+            # Check if 'Blocks' is in the response
+            if 'Blocks' not in response:
+                raise ValueError("No 'Blocks' found in the response. Check the document or API response.")
+
+            # Extract lines of text from the Blocks
+            lines = [block['Text'] for block in response['Blocks'] if block['BlockType'] == 'LINE']
+            return '\n'.join(lines)
+        
+        except boto3.exceptions.S3UploadFailedError as e:
+            print(f"S3 upload failed: {str(e)}")
+            return None
+        except ValueError as e:
+            print(f"Error: {str(e)}")
+            return None
+        except Exception as e:
+            print(f"Error during OCR extraction: {str(e)}")
+        return None
+
 
     def categorize_receipt_with_gpt(self, extracted_text):
         prompt = f"""
@@ -332,12 +352,10 @@ class ReceiptUploadView(APIView):
         \"\"\"{extracted_text}\"\"\"
         Return only well-formed JSON. Do not add any explanation or text outside JSON.
         """
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=1500,
-        )
+        response = client.chat.completions.create(model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=1500)
         return response.choices[0].message.content
 
     def safe_parse_json(self, raw_json):

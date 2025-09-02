@@ -20,3 +20,17 @@ class RecipeFilter(filters.FilterSet):
     class Meta:
         model = Recipe
         fields = ['name', ]
+
+class ClientFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name="name", lookup_expr='icontains')
+
+    class Meta:
+        model = Client
+        fields = ['name', ]
+
+class ReceiptFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name="title", lookup_expr='icontains')
+
+    class Meta:
+        model = Receipt
+        fields = ['name', ]

@@ -31,6 +31,9 @@ urlpatterns = [
     # Task module
     path('task/', include('task.urls.task_urls')),
     path('recipe/', include('task.urls.recipe_urls')),
+    path('client/', include('task.urls.client_urls')),
+    path('reciept/', include('task.urls.reciept_urls')),
+    # AI module
     path('core/', include('core.urls')),
 
 

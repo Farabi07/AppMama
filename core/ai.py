@@ -18,7 +18,6 @@ import openai
 warnings.filterwarnings("ignore")
 
   # Use your actual API key here
-openai.api_key = os.getenv('OPENAI_API_KEY')
 # 🎙️ Voice Recording Configuration
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
@@ -36,7 +35,7 @@ class VoiceRecorder:
         self.silence_start = None
         self.total_silence_start = None
         self.received_any_input = False
-        
+
     def record_with_timeout(self):
         """Record audio until silence is detected or timeout occurs"""
         stream = self.audio.open(format=FORMAT,
@@ -44,25 +43,25 @@ class VoiceRecorder:
                                 rate=RATE,
                                 input=True,
                                 frames_per_buffer=CHUNK)
-        
+
         print("🎙️  Task Mama: I'm listening... speak now! (I'll stop when you pause for 3 seconds)")
         print("🎙️  Task Mama: Speak clearly and take your time! 💕")
-        
+
         self.frames = []
         self.is_recording = True
         self.silence_start = None
         self.total_silence_start = time.time()  # Start timeout timer immediately
         self.received_any_input = False
-        
+
         try:
             while self.is_recording:
                 data = stream.read(CHUNK)
                 self.frames.append(data)
-                
+
                 # Convert audio data to check volume level
                 import audioop
                 volume = audioop.rms(data, 2)
-                
+
                 if volume < SILENCE_THRESHOLD:
                     # Check if this is the first silence after receiving input
                     if self.silence_start is None:
@@ -81,27 +80,27 @@ class VoiceRecorder:
                     self.silence_start = None
                     self.total_silence_start = time.time()  # Reset timeout timer when sound is detected
                     self.received_any_input = True
-                    
+
         except KeyboardInterrupt:
             print("🎙️  Task Mama: Recording stopped by user.")
             return "interrupted"
-            
+
         finally:
             stream.stop_stream()
             stream.close()
-            
+
         return "completed"
-    
+
     def save_audio_to_file(self, frames):
         """Save recorded frames to a temporary WAV file"""
         if not frames:
             return None
-            
+
         # Create a temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
         temp_filename = temp_file.name
         temp_file.close()
-        
+
         # Write audio data to the file
         wf = wave.open(temp_filename, 'wb')
         wf.setnchannels(CHANNELS)
@@ -109,14 +108,14 @@ class VoiceRecorder:
         wf.setframerate(RATE)
         wf.writeframes(b''.join(frames))
         wf.close()
-        
+
         return temp_filename
-    
+
     def transcribe_audio(self, audio_file_path):
         """Use OpenAI Whisper to transcribe audio to text"""
         if not audio_file_path or not os.path.exists(audio_file_path):
             return None
-            
+
         try:
             with open(audio_file_path, 'rb') as audio_file:
                 transcript = openai.audio.transcriptions.create(
@@ -132,7 +131,7 @@ class VoiceRecorder:
             # Clean up the temporary file
             if os.path.exists(audio_file_path):
                 os.remove(audio_file_path)
-    
+
     def cleanup(self):
         """Clean up PyAudio resources"""
         self.audio.terminate()
@@ -190,31 +189,31 @@ def get_voice_input():
     try:
         # Record audio with timeout detection
         recording_result = voice_recorder.record_with_timeout()
-        
+
         if recording_result == "timeout":
             return "", 'timeout'
         elif recording_result == "interrupted":
             return "", 'interrupted'
         elif not voice_recorder.frames or not voice_recorder.received_any_input:
             return "", 'empty'
-        
+
         # Save audio to temporary file
         audio_file_path = voice_recorder.save_audio_to_file(voice_recorder.frames)
-        
+
         if not audio_file_path:
             return "", 'empty'
-        
+
         # Transcribe using Whisper
         print("🌸 Task Mama: Converting your beautiful voice to text... 💭")
         transcribed_text = voice_recorder.transcribe_audio(audio_file_path)
-        
+
         if transcribed_text:
             print(f"🎙️  I heard you say: \"{transcribed_text}\"")
             return transcribed_text, 'success'
         else:
             print("🌸 Task Mama: I'm sorry, I couldn't understand what you said. Could you try speaking a bit louder or clearer? 💕")
             return "", 'empty'
-            
+
     except Exception as e:
         print(f"🚫 Voice Input Error: {e}")
         print("🌸 Task Mama: There was an issue with voice recording. Let me try again! 💕")
@@ -225,7 +224,7 @@ def choose_input_mode():
     print("\n🌸 Task Mama: How would you like to chat with me today? 💕")
     print("   1️⃣  Type 'text' for typing your messages")
     print("   2️⃣  Type 'voice' to speak to me")
-    
+
     while True:
         try:
             choice = input("💕 Your choice (text/voice): ").strip().lower()
@@ -276,26 +275,26 @@ def analyze_mama_emotions(user_input):
 def detect_emotions_by_keywords(user_input):
     """Fallback emotion detection using keywords - ONLY for explicit emotional distress"""
     text = user_input.lower()
-    
+
     # UPDATED: More specific sad keywords - only explicit emotional statements
     sad_keywords = ['i am sad', 'feeling sad', 'i feel sad', 'i am depressed', 'feeling depressed', 
                    'i am not feeling well', 'not feeling good', 'feeling down', 'feeling low',
                    'i am stressed', 'feeling stressed', 'i feel stressed', 'bad mood', 'in a bad mood',
                    'feeling overwhelmed', 'i am overwhelmed', 'i feel overwhelmed', 'having a hard time',
                    'struggling today', 'not doing well', 'feeling terrible', 'feeling awful']
-    
+
     # REMOVED: Generic overwhelm keywords that could be confused with normal planning
     overwhelm_keywords = ['feeling swamped', 'completely overwhelmed', 'emotionally overwhelmed',
                          'can\'t cope', 'breaking down', 'falling apart', 'too much stress']
-    
+
     happy_keywords = ['i am happy', 'feeling happy', 'i feel happy', 'feeling great', 'doing great',
                      'i am blessed', 'feeling blessed', 'so grateful', 'feeling wonderful',
                      'having a good day', 'feeling amazing', 'in a good mood']
-    
+
     is_sad = any(keyword in text for keyword in sad_keywords)
     is_overwhelmed = any(keyword in text for keyword in overwhelm_keywords)
     is_happy = any(keyword in text for keyword in happy_keywords)
-    
+
     return {
         'is_sad': is_sad,
         'is_overwhelmed': is_overwhelmed,
@@ -308,7 +307,7 @@ def detect_emotions_by_keywords(user_input):
 def detect_task_planning_request(user_input):
     """Detect if mama specifically wants help with task planning or scheduling"""
     text = user_input.lower()
-    
+
     task_planning_phrases = [
         'plan my day', 'make my schedule', 'create my today\'s plan', 'make my tomorrow\'s plan',
         'give me a schedule', 'make my todays plan', 'give me the task list', 'create my task list',
@@ -321,14 +320,14 @@ def detect_task_planning_request(user_input):
         'make my schedule for today', 'create schedule for today', 'plan schedule for today',
         'schedule my today', 'schedule for today', 'todays plan', 'today\'s plan'
     ]
-    
+
     return any(phrase in text for phrase in task_planning_phrases)
 
 # 🍳 Recipe Request Detection - FIXED VERSION
 def detect_recipe_request(user_input):
     """Detect if mama specifically wants recipe suggestions - IMPROVED VERSION"""
     text = user_input.lower()
-    
+
     recipe_phrases = [
         # General recipe requests
         'give me recipe', 'suggest me recipe', 'suggest me some recipe', 'suggest recipe',
@@ -354,7 +353,7 @@ def detect_recipe_request(user_input):
         'give me cooking suggestions for brunch', 'give me cooking suggestions for dinner',
         'give me cooking suggestions for supper'
     ]
-    
+
     return any(phrase in text for phrase in recipe_phrases)
 
 # Task extraction and analysis functions (keeping original functionality)
@@ -428,7 +427,7 @@ class DynamicTaskPrioritizer:
         Use AI to dynamically analyze task priority based on natural language understanding
         rather than static keyword matching
         """
-        
+
         prompt = f"""
 You are an expert task prioritization assistant for busy parents and caregivers.
 
@@ -461,7 +460,7 @@ Priority Levels (use exactly these strings):
 
 Only return valid JSON, no other text.
 """
-        
+
         try:
             response = self.openai_openai.chat.completions.create(
                 model="gpt-4",
@@ -472,16 +471,16 @@ Only return valid JSON, no other text.
                 temperature=0.2,
                 max_tokens=500,
             )
-            
+
             result_text = response.choices[0].message.content.strip()
-            
+
             # Clean up response
             if result_text.startswith("```json"):
                 result_text = result_text.replace("```json", "").replace("```", "").strip()
-            
+
             priority_data = json.loads(result_text)
             return priority_data
-            
+
         except Exception as e:
             print(f"Error in priority analysis: {e}")
             # Fallback to medium priority
@@ -493,12 +492,12 @@ Only return valid JSON, no other text.
                 "time_flexibility": "flexible",
                 "consequences_of_delay": "Medium"
             }
-    
+
     def analyze_task_responsibility(self, task_description, context=""):
         """
         Use AI to determine WHO will do the task based on natural language understanding
         """
-        
+
         prompt = f"""
 You are an expert task analysis assistant. Your job is to identify WHO WILL PERFORM each task.
 
@@ -536,7 +535,7 @@ Task Categories (use exactly these strings):
 
 Analyze the EXACT wording to determine who performs the task.
 """
-        
+
         try:
             response = self.openai_openai.chat.completions.create(
                 model="gpt-4",
@@ -649,7 +648,7 @@ For each recipe, write 5-6 sentences with:
 
 Format your response as a clear list of 3 recipes with names and detailed descriptions.
 """
-    
+
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
@@ -660,12 +659,12 @@ Format your response as a clear list of 3 recipes with names and detailed descri
             max_tokens=1500,
             temperature=0.4
         )
-        
+
         ai_response = response.choices[0].message.content.strip()
-        
+
         # Parse the AI response and create our JSON structure
         return parse_ai_recipe_response(ai_response, available_items, now, meal_type)
-        
+
     except Exception as e:
         # Fallback to manual recipe creation
         return create_smart_recipe_from_ingredients(available_items, now, meal_type)
@@ -773,30 +772,30 @@ def create_smart_recipe_from_ingredients(available_items, now, meal_type):
     Create 3 unique, detailed recipes using AI knowledge and the actual ingredients provided
     """
     items_lower = available_items.lower()
-    
+
     # Initialize recipe data
     recipes = []
     recipe_names = []
-    
+
     # Analyze ingredients and create appropriate recipes
     has_mutton = "mutton" in items_lower
     has_rice = "rice" in items_lower or "basmati" in items_lower
     has_vegetables = "vegetable" in items_lower
     has_seasoning = "seasoning" in items_lower or "spice" in items_lower
-    
+
     if has_mutton and has_rice:
         # Recipe 1: Traditional Curry Style
         recipe_names.append("Recipe 1: Traditional Mutton Curry")
         recipes.append(
             "Recipe 1: Traditional Mutton Curry: Cut 1 kg mutton into medium-sized pieces and wash thoroughly under cold water. Heat 3 tablespoons of cooking oil in a heavy-bottomed pot over medium-high heat for 2 minutes. Add the mutton pieces and brown them on all sides for 8-10 minutes until they develop a nice golden color. Add your available vegetables (chopped) and seasonings, then pour enough water to just cover the meat. Bring the mixture to a rolling boil, then reduce heat to low and cover with a tight-fitting lid. Simmer gently for 1.5 to 2 hours, stirring occasionally, until the mutton becomes fork-tender and the curry develops rich flavors. This protein-packed curry is perfect for lunch and provides essential nutrients including iron and protein that growing children need. For kids, you can make smaller, bite-sized pieces and serve with plain rice to make it easier to eat and less spicy."
         )
-        
+
         # Recipe 2: Biryani Style  
         recipe_names.append("Recipe 2: Aromatic Mutton Biryani")
         recipes.append(
             "Recipe 2: Aromatic Mutton Biryani: Begin by soaking 3 cups of basmati rice in lukewarm water for 30 minutes, then drain completely. In a large, heavy-bottomed pot, cook the mutton pieces with chopped vegetables and half of your seasonings in enough water to cover for about 1 hour until 70% cooked. In a separate large pot, bring 6 cups of salted water to boil and add the soaked rice, cooking for 5-7 minutes until 70% done, then drain. Layer the partially cooked rice over the mutton in the first pot, sprinkle remaining seasonings on top, and add dots of oil around the edges. Cover the pot with aluminum foil, then place the lid tightly on top and cook on high heat for 3-4 minutes until steam forms, then reduce to lowest heat and cook for 45 minutes. Let it rest for 10 minutes before opening to allow the flavors to meld perfectly. This aromatic one-pot meal combines the richness of mutton with fragrant basmati rice, creating a complete lunch that kids absolutely love for its colorful presentation and amazing smell. The layered cooking method ensures each grain of rice absorbs the meat flavors while staying fluffy and separate."
         )
-        
+
         # Recipe 3: Simple Rice Bowl Style
         recipe_names.append("Recipe 3: Hearty Mutton Rice Bowl")
         recipes.append(
@@ -814,7 +813,7 @@ def create_smart_recipe_from_ingredients(available_items, now, meal_type):
             "Recipe 2: Slow-Cooked Comfort Dish: Layer your ingredients in a pot with seasonings and cook on low heat for maximum flavor development. The slow cooking process ensures all ingredients are perfectly tender.",
             "Recipe 3: Simple Homestyle Preparation: Cook your ingredients with seasonings using traditional methods for a comforting, nutritious meal that the whole family will enjoy."
         ]
-    
+
     return {
         "meal_type": meal_type,
         "task_category": "Recipy task",
@@ -931,7 +930,7 @@ def add_to_conversation(role, content):
     """Add message to conversation history"""
     global conversation_history
     conversation_history.append({"role": role, "content": content})
-    
+
     # Keep manageable history
     if len(conversation_history) > 25:
         conversation_history = [conversation_history[0]] + conversation_history[-24:]
@@ -940,24 +939,24 @@ def get_mama_response(user_input):
     """Get AI response with mama's context"""
     try:
         print("💭 Task Mama is thinking of the perfect response...")
-        
+
         add_to_conversation("user", user_input)
-        
+
         response = openai.chat.completions.create(
             model="gpt-4",
             messages=conversation_history,
             max_tokens=300,
             temperature=0.8
         )
-        
+
         ai_response = response.choices[0].message.content
         add_to_conversation("assistant", ai_response)
-        
+
         return ai_response
-        
+
     except Exception as e:
         print(f"🚫 AI Response Error: {e}")
-        
+
         # Warm fallback responses for mama
         fallback_responses = [
             "Oh sweetie, I'm having a little technical hiccup, but I'm still here for you! 💕 Tell me what's on your heart.",
@@ -989,9 +988,9 @@ def chat_with_task_mama():
         input_mode = choose_input_mode()
         if input_mode == "exit":
             break
-            
+
         conversation_active = True
-        
+
         while conversation_active:
             if input_mode == "voice":
                 print("🎙️  Voice Mode Activated! Speak clearly and I'll listen with love! 💕")
@@ -1035,9 +1034,9 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: I'd love to help you organize your day! 📋✨ Please tell me about all the tasks you need to do, and I'll create a beautiful schedule for you.")
                     if input_mode == "voice":
                         print("\n🎙️  Tell me about your tasks... I'm listening! 💕")
-                    
+
                     task_details, task_status = get_user_input(input_mode)
-                    
+
                     if task_status == 'timeout':
                         print("🌸 Task Mama: I didn't hear anything for a while, sweetie. Let's choose how you'd like to continue chatting! 💕")
                         conversation_active = False
@@ -1062,9 +1061,9 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: I'd love to help you with some delicious recipe ideas! 🍳✨ What items do you have available in your pantry, kitchen, home, or fridge?")
                     if input_mode == "voice":
                         print("\n🎙️  Tell me what ingredients you have... I'm listening! 💕")
-                    
+
                     available_items, recipe_status = get_user_input(input_mode)
-                    
+
                     if recipe_status == 'timeout':
                         print("🌸 Task Mama: I didn't hear anything for a while, sweetie. Let's choose how you'd like to continue chatting! 💕")
                         conversation_active = False
@@ -1093,9 +1092,9 @@ def chat_with_task_mama():
                     print("🌸 I can sense you might not be feeling your best right now. 💕 Would you like me to share a pep talk to motivate you Mama 💖 (yes/no)?")
                     if input_mode == "voice":
                         print("\n🎙️  Just say yes or no... I'm here for you! 💕")
-                    
+
                     user_response, pep_status = get_user_input(input_mode)
-                    
+
                     if pep_status == 'timeout':
                         print("🌸 Task Mama: I didn't hear anything for a while, sweetie. Let's choose how you'd like to continue chatting! 💕")
                         conversation_active = False
@@ -1131,7 +1130,7 @@ def chat_with_task_mama():
 if __name__ == "__main__":
     print("🚀 Task Mama is starting up...")
     print("🎙️  Checking microphone and voice capabilities...")
-    
+
     # Check if required libraries are available
     try:
         import pyaudio
@@ -1139,7 +1138,7 @@ if __name__ == "__main__":
     except ImportError:
         print("⚠️  Voice input not available. Install pyaudio with: pip install pyaudio")
         print("   Falling back to text-only mode...")
-        
+
     try:
         chat_with_task_mama()
     finally:
