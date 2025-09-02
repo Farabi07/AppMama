@@ -1,3 +1,4 @@
+from urllib import response
 from django.core.exceptions import ObjectDoesNotExist
 
 from rest_framework import serializers, status
@@ -14,7 +15,7 @@ from task.filters import TaskFilter
 
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
-
+from django.utils import timezone
 
 
 
@@ -178,7 +179,7 @@ def updateTask(request,pk):
 
 
 
-@extend_schema(request=TaskSerializer, responses=TaskSerializer)
+@extend_schema(request=TaskListSerializer, responses=TaskListSerializer)
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_DELETE.name])
@@ -190,3 +191,41 @@ def deleteTask(request, pk):
 	except ObjectDoesNotExist:
 		return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("page"),
+        OpenApiParameter("size"),
+    ],
+    request=TaskListSerializer,
+    responses=TaskListSerializer
+)
+@api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
+def getTodayTask(request):
+
+    today = timezone.now().date()
+    print("Today's date:", today)
+    tasks = Task.objects.filter(scheduled_date=today)
+    total_elements = tasks.count()
+
+    page = request.query_params.get('page')
+    size = request.query_params.get('size')
+
+    # Pagination
+    pagination = Pagination()
+    pagination.page = page
+    pagination.size = size
+    tasks = pagination.paginate_data(tasks)
+
+    serializer = TaskListSerializer(tasks, many=True)
+
+    response = {
+        'tasks': serializer.data,
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_elements,
+    }
+
+    return Response(response, status=status.HTTP_200_OK)

@@ -35,3 +35,7 @@ class RecipeAdmin(admin.ModelAdmin):
 @admin.register(Receipt)
 class ReceiptAdmin(admin.ModelAdmin):
     list_display = [field.name for field in Receipt._meta.fields]
+
+@admin.register(Client)
+class ClientAdmin(admin.ModelAdmin):
+    list_display = [field.name for field in Client._meta.fields]

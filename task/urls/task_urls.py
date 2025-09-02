@@ -17,7 +17,9 @@ urlpatterns = [
 	path('api/v1/task/update/<int:pk>', views.updateTask),
 
 	path('api/v1/task/delete/<int:pk>', views.deleteTask),
+    
+	path('api/v1/task/all/', views.getAllTask),
 
-
+	path('api/v1/task/today/', views.getTodayTask),
 
 ]

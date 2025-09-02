@@ -89,7 +89,7 @@ def handle_task_mama_request(request):
             }
             return JsonResponse(response, status=200)
 
-        # 3. Recipe Ingredient Response (user provides ingredients)
+        
         # 3. Recipe Ingredient Response (user provides ingredients)
         elif user_input:  # implement this detection
             available_items = user_input

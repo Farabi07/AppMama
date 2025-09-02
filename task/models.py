@@ -239,3 +239,19 @@ class Receipt(models.Model):
             # Automatically set the processed_at field when the receipt is processed
             self.processed_at = self.processed_at or models.DateTimeField(auto_now_add=True).default
         super().save(*args, **kwargs)
+
+class Client(models.Model):
+    name = models.CharField(max_length=200, null=True, blank=True)
+    date_of_interaction = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-id']
+        verbose_name_plural = 'Client'
+    
+    def __str__(self):
+        return self.name
