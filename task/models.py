@@ -198,7 +198,7 @@ class Recipe(models.Model):
 class Receipt(models.Model):
     # Basic information from the receipt
     image = models.ImageField(upload_to='receipts/')
-    extracted_text = models.TextField(blank=True, null=True)
+    # extracted_text = models.TextField(blank=True, null=True)
     extracted_data = models.JSONField(blank=True, null=True)
 
     # Detailed receipt information
@@ -207,7 +207,7 @@ class Receipt(models.Model):
     shop_name = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     payment_method = models.CharField(max_length=100, blank=True, null=True)
-
+    quantity = models.IntegerField(blank=True, null=True)
     # For storing the items purchased
     items = models.JSONField(blank=True, null=True)  # List of dictionaries containing item info
     services = models.JSONField(blank=True, null=True)  # List of dictionaries containing services (if any)

@@ -282,7 +282,6 @@ class ReceiptUploadView(APIView):
         structured_data = self.safe_parse_json(raw_json)
 
         # Step 5: Save the extracted data in the database
-        receipt.extracted_text = extracted_text
         receipt.extracted_data = structured_data
         receipt.date = structured_data.get('date', '')
         receipt.time = structured_data.get('time', '')
@@ -296,6 +295,7 @@ class ReceiptUploadView(APIView):
         receipt.subtotal = structured_data.get('subtotal', 0.0)
         receipt.tax = structured_data.get('tax', 0.0)
         receipt.discount = structured_data.get('discount', 0.0)
+        receipt.quantity = structured_data.get('qty', 0)
         receipt.total_cost = structured_data.get('total_cost', 0.0)
 
         # Set processed_at when receipt is processed
@@ -364,3 +364,101 @@ class ReceiptUploadView(APIView):
         except json.JSONDecodeError as e:
             print("JSON decode error:", e)
             return None  
+        
+# views.py
+import os, json, boto3
+from datetime import datetime
+from django.http import JsonResponse
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from openai import OpenAI
+
+
+client = OpenAI()
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def receipt_preview(request):
+    image = request.FILES.get("image")
+    if not image:
+        return JsonResponse({"error": "No image provided."}, status=400)
+
+    # Save temporary image
+    image_path = os.path.join("media/tmp", image.name)
+    os.makedirs("media/tmp", exist_ok=True)
+    with open(image_path, "wb+") as f:
+        for chunk in image.chunks():
+            f.write(chunk)
+
+    # Step 1: OCR with AWS Textract
+    textract_client = boto3.client(
+        "textract",
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_REGION"),
+    )
+
+    with open(image_path, "rb") as img_file:
+        img_bytes = img_file.read()
+
+    response = textract_client.detect_document_text(Document={"Bytes": img_bytes})
+    lines = [block["Text"] for block in response["Blocks"] if block["BlockType"] == "LINE"]
+    extracted_text = "\n".join(lines)
+
+    # Step 2: GPT categorization
+    prompt = f"""
+    You are an AI specialized in extracting and categorizing receipt data.
+    Fix unreadable parts, ensure unit price and totals are correct.
+    Extract JSON with: 
+    date, time, shop_name, address, payment_method, 
+    items (list of dict: name, qty, unit_price, total_price), 
+    services (list of dict), vat_percentage, vat_amount, subtotal, tax, discount, total_cost.
+    Receipt text:
+    \"\"\"{extracted_text}\"\"\"
+    Return only JSON.
+    """
+    gpt_response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=1500,
+    )
+    raw_json = gpt_response.choices[0].message.content
+
+    try:
+        structured_data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Failed to parse GPT response."}, status=500)
+
+    # ✅ Return preview only (not saved in DB yet)
+    return JsonResponse(structured_data, safe=False, status=200)
+
+
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.parsers import JSONParser
+
+@api_view(["POST"])
+@parser_classes([JSONParser])
+def save_final_receipt(request):
+    data = request.data
+
+    receipt = Receipt.objects.create(
+        date=data.get("date", ""),
+        time=data.get("time", ""),
+        shop_name=data.get("shop_name", ""),
+        address=data.get("address", ""),
+        payment_method=data.get("payment_method", ""),
+        items=data.get("items", []),
+        services=data.get("services", []),
+        vat_percentage=data.get("vat_percentage", 0.0),
+        vat_amount=data.get("vat_amount", 0.0),
+        subtotal=data.get("subtotal", 0.0),
+        tax=data.get("tax", 0.0),
+        discount=data.get("discount", 0.0),
+        quantity=data.get("qty", 0),
+        total_cost=data.get("total_cost", 0.0),
+        extracted_data=data,
+        processed_at=datetime.now(),
+    )
+
+    return JsonResponse({"message": "Receipt saved successfully", "receipt_id": receipt.id}, status=201)

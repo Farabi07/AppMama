@@ -17,6 +17,13 @@ urlpatterns = [
 	path('api/v1/reciept/update/<int:pk>', views.updateReceipt),
 
 	path('api/v1/reciept/delete/<int:pk>', views.deleteReceipt),
+    
+	path('receipt/<int:receipt_id>/add-item/', views.addItemtoReceipt, name='add-item-to-receipt'),
+
+	path('receipt/<int:receipt_id>/<str:type_str>/<int:index>/update/', views.updateItemOrService, name='update-item-service'),
+    path('receipt/<int:receipt_id>/<str:type_str>/<int:index>/delete/', views.deleteItemOrService, name='delete-item-service'),
+
+
 
 
 
