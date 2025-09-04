@@ -441,6 +441,13 @@ from rest_framework.parsers import JSONParser
 @parser_classes([JSONParser])
 def save_final_receipt(request):
     data = request.data
+    receipt_type = data.get("receipt_type")
+
+    if receipt_type not in ["expense", "sales"]:
+        return JsonResponse(
+            {"error": "Invalid receipt_type. Must be 'expense' or 'sales'"},
+            status=400
+        )
 
     receipt = Receipt.objects.create(
         date=data.get("date", ""),
@@ -459,6 +466,13 @@ def save_final_receipt(request):
         total_cost=data.get("total_cost", 0.0),
         extracted_data=data,
         processed_at=datetime.now(),
+        receipt_type=receipt_type  # ✅ store type here
     )
 
-    return JsonResponse({"message": "Receipt saved successfully", "receipt_id": receipt.id}, status=201)
+    return JsonResponse(
+        {
+            "message": f"{receipt_type.title()} receipt saved successfully",
+            "receipt_id": receipt.id
+        },
+        status=201
+    )

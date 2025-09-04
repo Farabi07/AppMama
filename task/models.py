@@ -201,6 +201,7 @@ class Receipt(models.Model):
         ("expense", "Expense"),
         ("sales", "Sales"),
     )
+    
     # Basic information from the receipt
     image = models.ImageField(upload_to='receipts/')
     extracted_data = models.JSONField(blank=True, null=True)
