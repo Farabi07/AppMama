@@ -33,6 +33,7 @@ urlpatterns = [
     path('recipe/', include('task.urls.recipe_urls')),
     path('client/', include('task.urls.client_urls')),
     path('reciept/', include('task.urls.reciept_urls')),
+    path('qrcode/', include('task.urls.qrcode_urls')),
     # AI module
     path('core/', include('core.urls')),
 
