@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
 from drf_spectacular.utils import  extend_schema, OpenApiParameter
+from django.http import JsonResponse
 
 from authentication.decorators import has_permissions
 from task.models import Receipt
@@ -193,98 +194,153 @@ def deleteReceipt(request, pk):
 	except ObjectDoesNotExist:
 		return Response({'detail': f"Receipt id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
-def addItemtoReceipt(request, receipt_id):
-    """
-    Add a new item to an existing receipt
-    """
-    receipt = get_object_or_404(Receipt, id=receipt_id)
+# @api_view(['POST'])
+# def addItemtoReceipt(request, receipt_id):
+#     """
+#     Add a new item to an existing receipt
+#     """
+#     receipt = get_object_or_404(Receipt, id=receipt_id)
 
-    name = request.data.get("name")
-    qty = request.data.get("qty", 1)
+#     name = request.data.get("name")
+#     qty = request.data.get("qty", 1)
 
-    if not name:
-        return Response({"error": "Item name is required"}, status=status.HTTP_400_BAD_REQUEST)
+#     if not name:
+#         return Response({"error": "Item name is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Prepare new item dictionary
-    new_item = {
-        "name": name,
-        "quantity": qty
-    }
+#     # Prepare new item dictionary
+#     new_item = {
+#         "name": name,
+#         "quantity": qty
+#     }
 
-    # Append to existing items
-    receipt.items = (receipt.items or []) + [new_item]
-    receipt.save()
+#     # Append to existing items
+#     receipt.items = (receipt.items or []) + [new_item]
+#     receipt.save()
 
-    return Response({
-        "message": "Item added successfully",
-        "items": receipt.items
-    }, status=status.HTTP_200_OK)
+#     return Response({
+#         "message": "Item added successfully",
+#         "items": receipt.items
+#     }, status=status.HTTP_200_OK)
 
-@api_view(['PUT'])
-def updateItemOrService(request, receipt_id, type_str, index):
-    """
-    Update an item or service in a receipt by index
-    type_str: 'item' or 'service'
-    index: position in the JSON array (0-based)
-    """
-    receipt = get_object_or_404(Receipt, id=receipt_id)
+# @api_view(['PUT'])
+# def updateItemOrService(request, receipt_id, type_str, index):
+#     """
+#     Update an item or service in a receipt by index
+#     type_str: 'item' or 'service'
+#     index: position in the JSON array (0-based)
+#     """
+#     receipt = get_object_or_404(Receipt, id=receipt_id)
     
-    if type_str not in ['item', 'service']:
-        return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
+#     if type_str not in ['item', 'service']:
+#         return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
 
-    data_list = receipt.items if type_str == 'item' else receipt.services
+#     data_list = receipt.items if type_str == 'item' else receipt.services
 
-    if not data_list or index < 0 or index >= len(data_list):
-        return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
+#     if not data_list or index < 0 or index >= len(data_list):
+#         return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Get updated data
-    name = request.data.get("name", data_list[index].get("name"))
-    quantity = request.data.get("quantity", data_list[index].get("quantity"))
+#     # Get updated data
+#     name = request.data.get("name", data_list[index].get("name"))
+#     quantity = request.data.get("quantity", data_list[index].get("quantity"))
 
-    # Update the item/service
-    data_list[index]["name"] = name
-    data_list[index]["quantity"] = quantity
+#     # Update the item/service
+#     data_list[index]["name"] = name
+#     data_list[index]["quantity"] = quantity
 
-    if type_str == 'item':
-        receipt.items = data_list
+#     if type_str == 'item':
+#         receipt.items = data_list
+#     else:
+#         receipt.services = data_list
+
+#     receipt.save()
+
+#     return Response({
+#         "message": f"{type_str.capitalize()} updated successfully",
+#         type_str + "s": data_list
+#     }, status=status.HTTP_200_OK)
+
+# @api_view(['DELETE'])
+# def deleteItemOrService(request, receipt_id, type_str, index):
+#     """
+#     Delete an item or service from a receipt by index
+#     """
+#     receipt = get_object_or_404(Receipt, id=receipt_id)
+
+#     if type_str not in ['item', 'service']:
+#         return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
+
+#     data_list = receipt.items if type_str == 'item' else receipt.services
+
+#     if not data_list or index < 0 or index >= len(data_list):
+#         return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
+
+#     # Remove the item/service
+#     removed = data_list.pop(index)
+
+#     if type_str == 'item':
+#         receipt.items = data_list
+#     else:
+#         receipt.services = data_list
+
+#     receipt.save()
+
+#     return Response({
+#         "message": f"{type_str.capitalize()} deleted successfully",
+#         "removed": removed,
+#         type_str + "s": data_list
+#     }, status=status.HTTP_200_OK)
+
+
+
+
+
+@api_view(["GET"])
+def listReceipts(request):
+    receipt_type = request.GET.get("type")  # "expense", "sales", or None
+    page = int(request.GET.get("page", 1))  # default page = 1
+    page_size = int(request.GET.get("page_size", 10))  # default 10 per page
+
+    # Filter by type if provided
+    if receipt_type:
+        if receipt_type not in ["expense", "sales"]:
+            return JsonResponse(
+                {"error": "Invalid type. Use 'expense' or 'sales'"},
+                status=400
+            )
+        receipts = Receipt.objects.filter(receipt_type=receipt_type)
     else:
-        receipt.services = data_list
+        receipts = Receipt.objects.all()
 
-    receipt.save()
+    total_count = receipts.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    receipts = receipts[start:end]
 
-    return Response({
-        "message": f"{type_str.capitalize()} updated successfully",
-        type_str + "s": data_list
-    }, status=status.HTTP_200_OK)
+    data = []
+    for r in receipts:
+        data.append({
+            "id": r.id,
+            "receipt_type": r.receipt_type,
+            "date": r.date,
+            "time": r.time,
+            "shop_name": r.shop_name,
+            "address": r.address,
+            "payment_method": r.payment_method,
+            "items": r.items,
+            "services": r.services,
+            "vat_percentage": r.vat_percentage,
+            "vat_amount": r.vat_amount,
+            "subtotal": r.subtotal,
+            "tax": r.tax,
+            "discount": r.discount,
+            "quantity": r.quantity,
+            "total_cost": r.total_cost,
+        })
 
-@api_view(['DELETE'])
-def deleteItemOrService(request, receipt_id, type_str, index):
-    """
-    Delete an item or service from a receipt by index
-    """
-    receipt = get_object_or_404(Receipt, id=receipt_id)
+    return JsonResponse({
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "results": data
+    }, status=200)
 
-    if type_str not in ['item', 'service']:
-        return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
-
-    data_list = receipt.items if type_str == 'item' else receipt.services
-
-    if not data_list or index < 0 or index >= len(data_list):
-        return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Remove the item/service
-    removed = data_list.pop(index)
-
-    if type_str == 'item':
-        receipt.items = data_list
-    else:
-        receipt.services = data_list
-
-    receipt.save()
-
-    return Response({
-        "message": f"{type_str.capitalize()} deleted successfully",
-        "removed": removed,
-        type_str + "s": data_list
-    }, status=status.HTTP_200_OK)

@@ -39,3 +39,7 @@ class ReceiptAdmin(admin.ModelAdmin):
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
     list_display = [field.name for field in Client._meta.fields]
+
+@admin.register(QRTaskData)
+class QRTaskDataAdmin(admin.ModelAdmin):
+    list_display = [field.name for field in QRTaskData._meta.fields]

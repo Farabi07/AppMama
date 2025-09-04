@@ -205,7 +205,7 @@ class Receipt(models.Model):
     # Basic information from the receipt
     image = models.ImageField(upload_to='receipts/')
     extracted_data = models.JSONField(blank=True, null=True)
-    receipt_type = models.CharField(max_length=10, choices=RECEIPT_TYPES)
+    receipt_type = models.CharField(max_length=10, choices=RECEIPT_TYPES, blank=True, null=True)
     # Detailed receipt information
     date = models.CharField(max_length=10, blank=True, null=True)  # e.g., 17-07-2025
     time = models.CharField(max_length=5, blank=True, null=True)   # e.g., 02:06
@@ -260,3 +260,22 @@ class Client(models.Model):
     
     def __str__(self):
         return self.name
+    
+
+class QRTaskData(models.Model):
+    title = models.CharField(max_length=200, null=True, blank=True)
+    contents = models.JSONField(null=True, blank=True)  # store as JSON array
+    task_metadata = models.ForeignKey(Task, on_delete=models.CASCADE, null=True, blank=True)
+    voice = models.FileField(upload_to='voices/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-id']
+        verbose_name_plural = 'QR Task Data'
+
+    def __str__(self):
+        return self.title
