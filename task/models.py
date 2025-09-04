@@ -169,6 +169,7 @@ class TaskAttachment(models.Model):
     
 
 class Recipe(models.Model):
+    
     name = models.CharField(max_length=200, null=True, blank=True)
     meal_type = models.CharField(max_length=200, null=True, blank=True)
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='recipes')
@@ -196,11 +197,14 @@ class Recipe(models.Model):
         return f"{self.name} - {self.meal_type}" 
 
 class Receipt(models.Model):
+    RECEIPT_TYPES = (
+        ("expense", "Expense"),
+        ("sales", "Sales"),
+    )
     # Basic information from the receipt
     image = models.ImageField(upload_to='receipts/')
-    # extracted_text = models.TextField(blank=True, null=True)
     extracted_data = models.JSONField(blank=True, null=True)
-
+    receipt_type = models.CharField(max_length=10, choices=RECEIPT_TYPES)
     # Detailed receipt information
     date = models.CharField(max_length=10, blank=True, null=True)  # e.g., 17-07-2025
     time = models.CharField(max_length=5, blank=True, null=True)   # e.g., 02:06
