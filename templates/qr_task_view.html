@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ data.title }}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f9;
+    }
+    .container {
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    .card h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    .contents li {
+      margin-bottom: 8px;
+    }
+    select, input[type="date"], input[type="time"] {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      background-color: #f9f9f9;
+    }
+    .priority {
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 8px;
+      background-color: #f9f9f9;
+      border: 1px solid #ccc;
+    }
+    .voice-control {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+    }
+    .voice-control audio {
+      width: 80%;
+    }
+    .voice-control span {
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>{{ data.title }}</h2>
+      <ul class="contents">
+        {% if data.contents %}
+          {% for item in data.contents %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        {% else %}
+          <li>No contents available.</li>
+        {% endif %}
+      </ul>
+
+      <div>
+        <label for="task-name">Task Name</label>
+        <input type="text" id="task-name" value="{{ data.task_metadata.task_name }}" placeholder="Enter task">
+
+        <label for="responsibilities">Responsibilities</label>
+        <select id="responsibilities">
+          <option value="self" {% if data.task_metadata.assigned_to_type == 'self' %}selected{% endif %}>Self</option>
+          <option value="team" {% if data.task_metadata.assigned_to_type == 'team' %}selected{% endif %}>Team</option>
+        </select>
+
+        <label for="priority">Priority</label>
+        <select id="priority" class="priority">
+          <option value="urgent" {% if data.task_metadata.priority == 'urgent' %}selected{% endif %}>Urgent</option>
+          <option value="high" {% if data.task_metadata.priority == 'high' %}selected{% endif %}>High</option>
+          <option value="medium" {% if data.task_metadata.priority == 'medium' %}selected{% endif %}>Medium</option>
+          <option value="low" {% if data.task_metadata.priority == 'low' %}selected{% endif %}>Low</option>
+        </select>
+
+        <label for="date-schedule">Date of Schedule</label>
+        <input type="date" id="date-schedule" value="{{ data.task_metadata.scheduled_date }}">
+
+        <label for="time-schedule">Time</label>
+        <input type="time" id="time-schedule" value="{{ data.task_metadata.scheduled_time }}">
+      </div>
+
+      <div class="voice-control">
+        {% if data.voice_url %}
+          <audio controls>
+            <source src="{{ data.voice_url }}" type="audio/mpeg">
+            Your browser does not support the audio element.
+          </audio>
+          <span>{{ voice_duration }}</span>
+        {% else %}
+          <p>No voice file available.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

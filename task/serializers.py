@@ -236,22 +236,52 @@ class QRTaskDataMinimalListSerializer(serializers.ModelSerializer):
 		fields = ['id', 'title']
 
 class QRTaskDataSerializer(serializers.ModelSerializer):
-	class Meta:
-		model = QRTaskData
-		fields = '__all__'
-	
-	def create(self, validated_data):
-		modelObject = super().create(validated_data=validated_data)
-		user = get_current_authenticated_user()
-		if user is not None:
-			modelObject.created_by = user
-		modelObject.save()
-		return modelObject
-	
-	def update(self, instance, validated_data):
-		modelObject = super().update(instance=instance, validated_data=validated_data)
-		user = get_current_authenticated_user()
-		if user is not None:
-			modelObject.updated_by = user
-		modelObject.save()
-		return modelObject
+    task_metadata = TaskSerializer(required=False)
+
+    class Meta:
+        model = QRTaskData
+        fields = '__all__'
+
+    def create(self, validated_data):
+        task_metadata_data = validated_data.pop('task_metadata', None)
+
+        qr_task = QRTaskData.objects.create(**validated_data)
+
+        user = get_current_authenticated_user()
+        if user:
+            qr_task.created_by = user
+            qr_task.save()
+
+        if task_metadata_data:
+            task_metadata = Task.objects.create(**task_metadata_data)
+            qr_task.task_metadata = task_metadata
+            qr_task.save()
+
+        return qr_task
+
+    def update(self, instance, validated_data):
+        task_metadata_data = validated_data.pop('task_metadata', None)
+
+        # update QRTaskData fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        user = get_current_authenticated_user()
+        if user:
+            instance.updated_by = user
+
+        instance.save()
+
+        if task_metadata_data:
+            if instance.task_metadata:
+                # update existing TaskMetadata
+                for attr, value in task_metadata_data.items():
+                    setattr(instance.task_metadata, attr, value)
+                instance.task_metadata.save()
+            else:
+                # create new TaskMetadata
+                task_metadata = Task.objects.create(**task_metadata_data)
+                instance.task_metadata = task_metadata
+                instance.save()
+
+        return instance

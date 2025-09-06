@@ -1,7 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
-
+from datetime import datetime, time
 
 class TaskCategory(models.Model):
     """Task categories for organization"""
@@ -64,7 +64,7 @@ class Task(models.Model):
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
     
     # Assignment and categorization
-    assigned_to_type = models.CharField(max_length=20, choices=ASSIGNED_TO_CHOICES)
+    assigned_to_type = models.CharField(max_length=20, choices=ASSIGNED_TO_CHOICES,blank=True, null=True)
     assigned_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True, related_name='assigned_tasks')
     # task_category = models.ForeignKey('TaskCategory', on_delete=models.SET_NULL, null=True, blank=True)
     # Priority and status
@@ -103,8 +103,20 @@ class Task(models.Model):
             models.Index(fields=['priority', 'scheduled_date']),
         ]
 
+    def save(self, *args, **kwargs):
+        # If scheduled_time is a string like "10:00 pm", convert it
+        if isinstance(self.scheduled_time, str):
+            try:
+                self.scheduled_time = datetime.strptime(
+                    self.scheduled_time.strip().lower(), "%I:%M %p"
+                ).time()
+            except ValueError:
+                # If it fails, set None or raise error
+                self.scheduled_time = None
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.task_name} - {self.task_category if self.task_category else 'No category'}"
+        return self.task_name
     
     @property
     def is_overdue(self):
@@ -278,4 +290,4 @@ class QRTaskData(models.Model):
         verbose_name_plural = 'QR Task Data'
 
     def __str__(self):
-        return self.title
+        return self.title or f"QRTask {self.pk}"

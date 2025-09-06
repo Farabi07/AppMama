@@ -13,6 +13,7 @@ urlpatterns = [
 	# path('api/v1/client/search/', views.searchQRTaskData),
 
 	path('api/v1/qrcode_image_generate/create/', views.createQRTaskData),
+    path('view/<int:pk>/', views.qr_task_view, name='qr_task_view'),
 
 	# path('api/v1/client/update/<int:pk>', views.updateQRTaskData),
 
