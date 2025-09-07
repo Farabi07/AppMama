@@ -17,7 +17,9 @@ from task.filters import ReceiptFilter
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
 
+from django.db.models import Sum
 
+from datetime import datetime, timedelta
 
 
 @extend_schema(
@@ -344,3 +346,86 @@ def listReceipts(request):
         "results": data
     }, status=200)
 
+
+
+
+@api_view(['POST'])
+def monthly_report(request):
+    # Get the current date
+    current_date = datetime.now()
+
+    # Get the first day of the current month (start of the month)
+    month_start = current_date.replace(day=1)
+
+    # Get the last day of the current month (end of the month)
+    next_month = month_start.replace(day=28) + timedelta(days=4)  # this gives the first day of next month
+    month_end = next_month - timedelta(days=next_month.day)  # subtract days to get the last day of the current month
+
+    # Get the first day of last month
+    last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+
+    # Get the last day of last month
+    last_month_end = month_start - timedelta(days=1)
+
+    # Filter receipts for the current month based on the 'date' field (convert to datetime)
+    sales_receipts = Receipt.objects.filter(
+        date__gte=month_start.strftime('%m/%d/%Y'), 
+        date__lte=month_end.strftime('%m/%d/%Y'), 
+        receipt_type='sales'
+    )
+    expense_receipts = Receipt.objects.filter(
+        date__gte=month_start.strftime('%m/%d/%Y'), 
+        date__lte=month_end.strftime('%m/%d/%Y'), 
+        receipt_type='expense'
+    )
+
+    # Filter receipts for last month based on the 'date' field
+    last_month_sales_receipts = Receipt.objects.filter(
+        date__gte=last_month_start.strftime('%m/%d/%Y'), 
+        date__lte=last_month_end.strftime('%m/%d/%Y'), 
+        receipt_type='sales'
+    )
+    last_month_expense_receipts = Receipt.objects.filter(
+        date__gte=last_month_start.strftime('%m/%d/%Y'), 
+        date__lte=last_month_end.strftime('%m/%d/%Y'), 
+        receipt_type='expense'
+    )
+
+    # Calculate total sales, expenses, and profit for the current month
+    total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+    total_expenses = expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+    profit = total_sales - total_expenses
+
+    # Calculate total sales, expenses, and profit for last month
+    last_month_sales = last_month_sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+    last_month_expenses = last_month_expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+    last_month_profit = last_month_sales - last_month_expenses
+
+    # Calculate percentage change in profit and expenses from last month
+    profit_change_percentage = 0
+    expense_change_percentage = 0
+
+    if last_month_profit != 0:
+        profit_change_percentage = ((profit - last_month_profit) / last_month_profit) * 100
+    
+    if last_month_expenses != 0:
+        expense_change_percentage = ((total_expenses - last_month_expenses) / last_month_expenses) * 100
+
+    # Format the percentages to 2 decimal places and add the '%' sign
+    profit_change_percentage = f"{profit_change_percentage:.2f}%"
+    expense_change_percentage = f"{expense_change_percentage:.2f}%"
+
+    # Prepare the response data
+    report_data = {
+        "month_year": current_date.strftime("%Y-%m"),  # Current month in "YYYY-MM" format
+        "total_sales": total_sales,
+        "total_expenses": total_expenses,
+        "profit": profit,
+        "last_month_sales": last_month_sales,
+        "last_month_expenses": last_month_expenses,
+        "last_month_profit": last_month_profit,  # Include last month's profit
+        "profit_change_percentage": profit_change_percentage,
+        "expense_change_percentage": expense_change_percentage,
+    }
+
+    return Response(report_data, status=200)

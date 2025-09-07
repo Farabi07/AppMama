@@ -215,7 +215,7 @@ class Receipt(models.Model):
     )
     
     # Basic information from the receipt
-    image = models.ImageField(upload_to='receipts/')
+    image = models.ImageField(upload_to='receipts/',blank=True, null=True)
     extracted_data = models.JSONField(blank=True, null=True)
     receipt_type = models.CharField(max_length=10, choices=RECEIPT_TYPES, blank=True, null=True)
     # Detailed receipt information
@@ -240,8 +240,8 @@ class Receipt(models.Model):
     # Timestamps for when the receipt was uploaded and processed
     uploaded_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True,blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True,blank=True, null=True)
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
