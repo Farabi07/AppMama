@@ -429,3 +429,55 @@ def monthly_report(request):
     }
 
     return Response(report_data, status=200)
+
+
+@api_view(['POST'])
+def monthly_statistics(request):
+    # Get the current date
+    current_date = datetime.now()
+
+    # Get the first day of the current month (start of the month)
+    month_start = current_date.replace(day=1)
+
+    # Get the first day of the previous month
+    last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+
+    # Get the number of months you want to look back
+    months_back = 6  # Last 6 months including the current month
+
+    # Initialize a list to hold monthly data
+    monthly_data = []
+
+    # Loop through the last few months
+    for month_offset in range(months_back):
+        # Calculate the first and last day of the month
+        month_start_date = (month_start - timedelta(days=month_offset * 30)).replace(day=1)
+        next_month = month_start_date.replace(day=28) + timedelta(days=4)
+        month_end_date = next_month - timedelta(days=next_month.day)
+
+        # Get the sales and expense receipts for the given month
+        sales_receipts = Receipt.objects.filter(
+            date__gte=month_start_date.strftime('%m/%d/%Y'),
+            date__lte=month_end_date.strftime('%m/%d/%Y'),
+            receipt_type='sales'
+        )
+        expense_receipts = Receipt.objects.filter(
+            date__gte=month_start_date.strftime('%m/%d/%Y'),
+            date__lte=month_end_date.strftime('%m/%d/%Y'),
+            receipt_type='expense'
+        )
+
+        # Calculate total sales, expenses, and profit for the month
+        total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+        total_expenses = expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
+        profit = total_sales - total_expenses
+
+        # Prepare the monthly data
+        monthly_data.append({
+            "month": month_start_date.strftime("%b"),  # Month name (e.g., "Jan", "Feb")
+            "total_sales": total_sales,
+            "total_expenses": total_expenses,
+            "profit": profit
+        })
+
+    return Response({"monthly_data": monthly_data}, status=200)

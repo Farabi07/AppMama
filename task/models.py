@@ -2,7 +2,8 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from datetime import datetime, time
-
+from django.contrib.auth import get_user_model
+User = get_user_model()
 class TaskCategory(models.Model):
     """Task categories for organization"""
     CATEGORY_TYPES = [
@@ -158,7 +159,7 @@ class TaskBatch(models.Model):
 class TaskComment(models.Model):
     """Comments and notes on tasks"""
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='comments')
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     comment = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     

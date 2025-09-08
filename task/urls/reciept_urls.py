@@ -21,6 +21,8 @@ urlpatterns = [
 	path('api/v1/reciept/list/', views.listReceipts, name='list-receipts'),
     
 	path('api/v1/reciept/monthly_report/', views.monthly_report, name='receipt-dashboard'),
+    
+	path('api/v1/reciept/monthly_statistics/', views.monthly_statistics, name='monthly-statistics'),
 
 	# path('receipt/<int:receipt_id>/add-item/', views.addItemtoReceipt, name='add-item-to-receipt'),
 

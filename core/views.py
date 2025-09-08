@@ -25,9 +25,10 @@ from .ai import (
     generate_task_analysis,
     generate_recipy_suggestion,
     get_meal_type_from_conversation,
-
+    extract_tasks_from_text,
     analyze_mama_emotions,
-    wants_pep_talk
+    wants_pep_talk,
+    DynamicTaskPrioritizer,
 )
 
 # Initialize the voice recorder
@@ -43,17 +44,17 @@ def convert_to_24hr_format(time_str):
         return time_obj.strftime("%H:%M")  # %H is 24-hour format
     except ValueError:
         raise ValueError(f"Invalid time format: {time_str}")
-
 @csrf_exempt
-@permission_classes([IsAuthenticated])  # Ensure user is authenticated
-@api_view(['POST'])  # Ensure this is a POST request
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
 def handle_task_mama_request(request):
     """
-    A single API endpoint that handles all functionalities:
-    - AI response generation (text/voice)
+    Unified API endpoint for Task Mama:
     - Task planning
     - Recipe suggestions
     - Emotional support
+    - Pep talk
+    - Task analysis
     """
     if request.method != 'POST':
         return JsonResponse({"error": "Invalid HTTP method. Use POST."}, status=405)
@@ -68,123 +69,96 @@ def handle_task_mama_request(request):
 
     input_mode = data.get('input_mode')
     user_input = data.get('user_input')
+    user = request.user
 
     if not input_mode or not user_input:
         return JsonResponse({"error": "Both input mode and user input are required."}, status=400)
 
-    user = request.user  # Authenticated user
+    # Helper: Stricter ingredient detection
+    def is_ingredient_list(text):
+        food_keywords = [
+            "rice", "mutton", "chicken", "egg", "potato", "tomato", "vegetable",
+            "seasoning", "salt", "oil", "flour", "milk", "onion", "pepper", "spice", "meat"
+        ]
+        return ("," in text and any(word in text.lower() for word in food_keywords) and len(text.split()) < 20)
 
-    # Handle Text input
-    if input_mode == 'text':
-        # 1. Task Planning
-        if detect_task_planning_request(user_input):
-            response = {
-                "response": "I'd love to help you organize your day! 📋✨ Please tell me about all the tasks you need to do, and I'll create a beautiful schedule for you."
-            }
-            return JsonResponse(response, status=200)
+    # 1. Task Planning Request
+    if detect_task_planning_request(user_input):
+        return JsonResponse({
+            "response": "I'd love to help you organize your day! 📋✨ Please tell me about all the tasks you need to do, and I'll create a beautiful schedule for you."
+        }, status=200)
 
-        # 2. Recipe Request (asking for ingredients)
-        elif detect_recipe_request(user_input):
-            response = {
-                "response": "I'd love to help you with some delicious recipe ideas! 🍳✨ What items do you have available in your pantry, kitchen, home, or fridge?"
-            }
-            return JsonResponse(response, status=200)
+    # 2. Recipe Request
+    if detect_recipe_request(user_input):
+        return JsonResponse({
+            "response": "I'd love to help you with some delicious recipe ideas! 🍳✨ What items do you have available in your pantry, kitchen, home, or fridge?"
+        }, status=200)
 
+    # 3. Emotional Support
+    emotions = analyze_mama_emotions(user_input)
+    if emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False):
+        return JsonResponse({
+            "response": "I can sense you might not be feeling your best right now. 💕 Would you like me to share a pep talk to motivate you Mama 💖 (yes/no)?"
+        }, status=200)
 
-        # 3. Recipe Ingredient Response (user provides ingredients)
-        elif user_input:  # implement this detection
-            available_items = user_input
-            recipe_suggestions = generate_recipy_suggestion(available_items, user_input)
-            print (recipe_suggestions)
-            if recipe_suggestions and "recipy" in recipe_suggestions:
-                # Create task data structure that matches what save_task_from_ai_response expects
-                task_data = {
-                    'task_name': 'Generated Recipe Task',
-                    'description': 'Generated based on AI recipe suggestions.',
-                    'date': recipe_suggestions.get("date", str(timezone.now().date())),
-                    'time': recipe_suggestions.get("time"),
-                    'task_assigned': 'self',
-                    'task_category': recipe_suggestions.get("task_category", "Recipe task"),
-                    'priority': 'medium'
-                }
+    # 4. Pep Talk
+    if wants_pep_talk(user_input):
+        return JsonResponse({
+            "response": "😢 I am always here with you, beautiful mama. You are stronger than you know, and tomorrow will be a brighter day. 💕"
+        }, status=200)
+    elif user_input.lower().strip() in ['no', 'n', 'not now', 'maybe later', 'nope', 'not really', 'no thanks', 'not today']:
+        return JsonResponse({
+            "response": "That's okay, sweetie. I'm still here to listen and chat with you. 💕"
+        }, status=200)
 
-                # Save task and recipes
-                task = save_task_from_ai_response(task_data, user)
-                save_recipe_from_ai_response(recipe_suggestions, task)
+    # 5. Happy Emotions
+    if emotions['is_happy']:
+        return JsonResponse({"response": "I'm glad to hear you're feeling happy! 💖🌸"}, status=200)
 
-                formatted_recipe_response = {
-                    "meal_type": recipe_suggestions.get("meal_type", "Other meal"),
-                    "task_category": recipe_suggestions.get("task_category", "Recipe task"),
-                    "time": recipe_suggestions.get("time", "Not specified"),
-                    "date": recipe_suggestions.get("date", str(timezone.now().date())),
-                    "items_available": recipe_suggestions.get("items_available", ""),
-                    "items_needed": recipe_suggestions.get("items_needed", ""),
-                    "recipy_name": recipe_suggestions.get("recipy_name", []),
-                    "recipy": recipe_suggestions.get("recipy", [])
-                }
+    # 6. Ingredient List (stricter detection)
+    if is_ingredient_list(user_input):
+        recipe_response = generate_recipy_suggestion(user_input)
+        # --- Store recipe task and recipes ---
+        recipe_task = save_task_from_ai_response({
+            "task_name": f"Recipe suggestion for {recipe_response.get('meal_type', 'meal')}",
+            "description": recipe_response.get('items_available', ''),
+            "date": recipe_response.get('date'),
+            "time": recipe_response.get('time'),
+            "task_assigned": "Self",
+            "task_category": recipe_response.get('task_category', 'Recipy task'),
+            "priority": "medium"
+        }, user)
+        save_recipe_from_ai_response(recipe_response, recipe_task)
+        return JsonResponse(recipe_response, status=200)
 
-                return JsonResponse(formatted_recipe_response, status=200)
-            else:
-                return JsonResponse({"error": "Could not generate recipes with the provided ingredients."}, status=400)
-        # 4. Task Details input (normal tasks)
-        elif input_mode(user_input):
-            task_analysis = generate_task_analysis(user_input)
-            if isinstance(task_analysis, dict) and task_analysis.get('tasks'):
-                for task_data in task_analysis.get('tasks'):
-                    task_time = task_data.get('time', '')
-                    task_data['time'] = convert_to_24hr_format(task_time) if task_time and task_time != "Not specified" else None
-                    save_task_from_ai_response(task_data, user)
-                return JsonResponse(task_analysis, status=200)
-            else:
-                return JsonResponse({"error": "Could not extract tasks. Please try to be more specific."}, status=400)
+    # 7. Normal Task Analysis & Storage (default fallback for planning sentences)
+    task_analysis = generate_task_analysis(user_input)
+    if task_analysis.get('tasks'):
+        for t in task_analysis['tasks']:
+            save_task_from_ai_response(t, user)
+        return JsonResponse(task_analysis, status=200)
 
-        # 5. Emotional Support
-        emotions = analyze_mama_emotions(user_input)
-        if emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False):
-            response = {
-                "response": "I can sense you might not be feeling your best right now. 💕 Would you like a pep talk to motivate you Mama 💖 (yes/no)?"
-            }
-            save_emotional_support(user_input, response)
-            return JsonResponse(response, status=200)
+    # 8. If AI returns a recipe (meal_type), handle that
+    ai_reply = get_mama_response(user_input)
+    try:
+        ai_json = json.loads(ai_reply)
+        if "meal_type" in ai_json:
+            recipe_task = save_task_from_ai_response({
+                "task_name": f"Recipe suggestion for {ai_json.get('meal_type', 'meal')}",
+                "description": ai_json.get('items_available', ''),
+                "date": ai_json.get('date'),
+                "time": ai_json.get('time'),
+                "task_assigned": "Self",
+                "task_category": ai_json.get('task_category', 'Recipy task'),
+                "priority": "medium"
+            }, user)
+            save_recipe_from_ai_response(ai_json, recipe_task)
+            return JsonResponse(ai_json, status=200)
+    except Exception:
+        pass
 
-        # 6. Pep Talk Request
-        if wants_pep_talk(user_input):
-            pep_talk_response = {
-                "response": "You're doing great, Mama! You have so much strength, and you're capable of amazing things! Keep going 💖💪"
-            }
-            save_emotional_support(user_input, pep_talk_response)
-            return JsonResponse(pep_talk_response, status=200)
-
-        # 7. Happy Emotions
-        elif emotions['is_happy']:
-            return JsonResponse({"response": "I'm glad to hear you're feeling happy! 💖🌸"}, status=200)
-
-        # 8. Normal AI Conversation
-        response = get_mama_response(user_input)
-        return JsonResponse({"response": response}, status=200)
-
-    # Handle Voice input
-    elif input_mode == 'voice':
-        try:
-            user_input, status = get_user_input('voice')
-
-            if status == 'timeout':
-                return JsonResponse({"error": "Voice input timed out. No input received."}, status=408)
-            elif status == 'interrupted':
-                return JsonResponse({"error": "Voice recording interrupted."}, status=500)
-            elif status == 'empty':
-                return JsonResponse({"error": "No voice input detected."}, status=400)
-            elif status == 'error':
-                return JsonResponse({"error": "Error processing the voice input."}, status=500)
-
-            response = chat_with_task_mama(user_input)
-            return JsonResponse(response, status=200)
-
-        except Exception as e:
-            return JsonResponse({"error": f"Error processing voice input: {str(e)}"}, status=500)
-
-    else:
-        return JsonResponse({"error": "Invalid input mode. Use 'text' or 'voice'."}, status=400)
+    # 9. Normal conversational AI fallback
+    return JsonResponse({"response": ai_reply}, status=200)
 
 
 # Function to save tasks into the database
@@ -249,16 +223,16 @@ def save_recipe_from_ai_response(recipe_data, task):
     return recipe
 
 
-# Function to save emotional support responses
-def save_emotional_support(user_input, response):
-    """Store emotional support data in TaskComment or custom EmotionalSupport model."""
-    # Assuming you're storing this in TaskComment for now
-    TaskComment.objects.create(
-        task=None,  # You can link this to a specific task if needed
-        user=None,  # Link this to the user who requested emotional support
-        comment=user_input + "\n\n" + response.response,
-        created_at=timezone.now(),
-    )
+# # Function to save emotional support responses
+# def save_emotional_support(user_input, response):
+#     """Store emotional support data in TaskComment or custom EmotionalSupport model."""
+#     # Assuming you're storing this in TaskComment for now
+#     TaskComment.objects.create(
+#         task=None,  # You can link this to a specific task if needed
+#         user=None,  # Link this to the user who requested emotional support
+#         comment=user_input + "\n\n" + response['response'],
+#         created_at=timezone.now(),
+#     )
 
 class ReceiptUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)

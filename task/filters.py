@@ -12,7 +12,7 @@ class TaskFilter(filters.FilterSet):
 
     class Meta:
         model = Task
-        fields = ['name', ]
+        fields = ['task_name', ]
 
 class RecipeFilter(filters.FilterSet):
     name = filters.CharFilter(field_name="title", lookup_expr='icontains')
