@@ -34,3 +34,9 @@ class ReceiptFilter(filters.FilterSet):
     class Meta:
         model = Receipt
         fields = ['name', ]
+class PeptalkFilter(filters.FilterSet):
+    title = filters.CharFilter(field_name="title", lookup_expr='icontains')
+
+    class Meta:
+        model = PeptalkData
+        fields = ['title', ]

@@ -27,37 +27,39 @@ from django.utils import timezone
 		
 		OpenApiParameter("size"),
   ],
-	request=TaskSerializer,
-	responses=TaskSerializer
+	request=TaskListSerializer,
+	responses=TaskListSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
+@permission_classes([IsAuthenticated])  # Ensures only authenticated users can access
 def getAllTask(request):
-	tasks = Task.objects.all()
-	total_elements = tasks.count()
+    # Filter tasks created by the logged-in user (Farabi)
+    tasks = Task.objects.filter(created_by=request.user)
+    total_elements = tasks.count()
 
-	page = request.query_params.get('page')
-	size = request.query_params.get('size')
+    # Retrieve pagination parameters from query parameters
+    page = request.query_params.get('page', 1)  # Default to page 1 if not provided
+    size = request.query_params.get('size', 10)  # Default to 10 tasks per page if not provided
 
-	# Pagination
-	pagination = Pagination()
-	pagination.page = page
-	pagination.size = size
-	tasks = pagination.paginate_data(tasks)
+    # Pagination logic
+    pagination = Pagination()
+    pagination.page = page
+    pagination.size = size
+    tasks = pagination.paginate_data(tasks)
 
-	serializer = TaskListSerializer(tasks, many=True)
+    # Serialize the task data
+    serializer = TaskListSerializer(tasks, many=True)
 
-	response = {
-		'tasks': serializer.data,
-		'page': pagination.page,
-		'size': pagination.size,
-		'total_pages': pagination.total_pages,
-		'total_elements': total_elements,
-	}
+    # Prepare the response
+    response = {
+        'tasks': serializer.data,
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_elements,
+    }
 
-	return Response(response, status=status.HTTP_200_OK)
-
+    return Response(response, status=status.HTTP_200_OK)
 
 
 
@@ -200,19 +202,21 @@ def deleteTask(request, pk):
     responses=TaskListSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getTodayTask(request):
-
     today = timezone.now().date()
     print("Today's date:", today)
-    tasks = Task.objects.filter(scheduled_date=today)
+
+    # ✅ filter tasks by logged-in user
+    tasks = Task.objects.filter(scheduled_date=today, created_by=request.user)
+
     total_elements = tasks.count()
 
+    # Pagination
     page = request.query_params.get('page')
     size = request.query_params.get('size')
 
-    # Pagination
     pagination = Pagination()
     pagination.page = page
     pagination.size = size

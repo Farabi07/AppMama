@@ -57,7 +57,8 @@ urlpatterns = [
     
     path('logout/', views.logout_view),
     
-    
+	path('api/user-relations/', views.UserRelationsView.as_view(), name='user-relations-current'),  # For current user
+    path('api/user-relations/<int:user_pk>/', views.UserRelationsView.as_view(), name='user-relations'),  # For specific user ID
 ]
 
 

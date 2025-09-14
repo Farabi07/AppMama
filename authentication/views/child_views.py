@@ -273,29 +273,29 @@ def ChildLogin(request):
         return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        Child = Child.objects.get(email=email)
+        child = Child.objects.get(email=email)
 
-        if not Child.password:
+        if not child.password:
             return Response({"error": "No password set for this Child"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not check_password(password, Child.password):
+        if not check_password(password, child.password):
             return Response({"error": "Incorrect password"}, status=status.HTTP_400_BAD_REQUEST)
 
         # ✅ Use the actual User instance
-        if not Child.user:
+        if not child.user:
             return Response({"error": "Child is not linked to a user"}, status=status.HTTP_400_BAD_REQUEST)
 
-        refresh = RefreshToken.for_user(Child.user)  # ✅ Corrected
+        refresh = RefreshToken.for_user(child.user)  # ✅ Corrected
         access_token = str(refresh.access_token)
 
         return Response({
             'access': access_token,
             'refresh': str(refresh),
-            'id': Child.id,
-            'role': Child.role,
-            'name': Child.name,
-            'email': Child.email,
-            'image': Child.image.url if Child.image else None,
+            'id': child.id,
+            'role': child.role,
+            'name': child.name,
+            'email': child.email,
+            'image': child.image.url if child.image else None,
         }, status=status.HTTP_200_OK)
 
     except Child.DoesNotExist:

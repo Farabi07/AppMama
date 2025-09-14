@@ -267,29 +267,29 @@ def PartnerLogin(request):
         return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        Partner = Partner.objects.get(email=email)
+        partner = Partner.objects.get(email=email)
 
-        if not Partner.password:
+        if not partner.password:
             return Response({"error": "No password set for this Partner"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not check_password(password, Partner.password):
+        if not check_password(password, partner.password):
             return Response({"error": "Incorrect password"}, status=status.HTTP_400_BAD_REQUEST)
 
         # ✅ Use the actual User instance
-        if not Partner.user:
+        if not partner.user:
             return Response({"error": "Partner is not linked to a user"}, status=status.HTTP_400_BAD_REQUEST)
 
-        refresh = RefreshToken.for_user(Partner.user)  # ✅ Corrected
+        refresh = RefreshToken.for_user(partner.user)  # ✅ Corrected
         access_token = str(refresh.access_token)
 
         return Response({
             'access': access_token,
             'refresh': str(refresh),
-            'id': Partner.id,
-            'role': Partner.role,
-            'name': Partner.name,
-            'email': Partner.email,
-            'image': Partner.image.url if Partner.image else None,
+            'id': partner.id,
+            'role': partner.role,
+            'name': partner.name,
+            'email': partner.email,
+            'image': partner.image.url if partner.image else None,
         }, status=status.HTTP_200_OK)
 
     except Partner.DoesNotExist:

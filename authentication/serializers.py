@@ -816,7 +816,7 @@ class ChildSerializer(serializers.ModelSerializer):
             validated_data['designation'] = designation_obj
 
         # Ensure default role
-        validated_data['role'] = validated_data.get('role', 'partner')
+        validated_data['role'] = validated_data.get('role', 'child')
 
         request = self.context.get('request')
         user = request.user if request and request.user.is_authenticated else None
@@ -856,3 +856,15 @@ class ChildSerializer(serializers.ModelSerializer):
         rep['role'] = instance.role
         rep['designation'] = instance.designation.name if instance.designation else None
         return rep
+class UserRelationsSerializer(serializers.Serializer):
+    user = serializers.SerializerMethodField()
+    partners = PartnerListSerializer(many=True)
+    children = ChildListSerializer(many=True)  # Note: 'children' for clarity, even if related_name is 'childs'
+
+    def get_user(self, obj):
+        # Return basic user info (customize as needed)
+        user = obj['user']
+        return {
+            'id': user.id,
+            'username': user.username,  # Add more fields if needed (e.g., email)
+        }

@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'authentication.apps.AuthenticationConfig',
     'task.apps.TaskConfig',
     'core.apps.CoreConfig',
+    'notification.apps.NotificationConfig',
 ]
 SITE_ID = 1
 AUTHENTICATION_BACKENDS = (

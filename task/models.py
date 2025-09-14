@@ -3,6 +3,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import datetime, time
 from django.contrib.auth import get_user_model
+from core.uitls import convert_to_24hr_format
 User = get_user_model()
 class TaskCategory(models.Model):
     """Task categories for organization"""
@@ -32,12 +33,7 @@ class TaskCategory(models.Model):
 
 class Task(models.Model):
     """Main task model based on AI response structure"""
-    PRIORITY_CHOICES = [
-        ('low', 'Low Priority'),
-        ('medium', 'Medium Priority'), 
-        ('high', 'High Priority'),
-        ('urgent', 'Urgent')
-    ]
+
     
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -56,6 +52,7 @@ class Task(models.Model):
     
     # Core task fields matching AI response
     task_name = models.CharField(max_length=200)
+    task_percentage = models.PositiveIntegerField(default=0)
     task_category = models.CharField(max_length=200,null=True,blank=True)
     description = models.TextField(blank=True, null=True)
     
@@ -69,7 +66,7 @@ class Task(models.Model):
     assigned_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, blank=True, null=True, related_name='assigned_tasks')
     # task_category = models.ForeignKey('TaskCategory', on_delete=models.SET_NULL, null=True, blank=True)
     # Priority and status
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
+    priority = models.CharField(max_length=20, blank=True, null=True, default='medium')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     
     # Family and ownership
@@ -96,7 +93,7 @@ class Task(models.Model):
     recurrence_pattern = models.CharField(max_length=50, blank=True, null=True)  # daily, weekly, monthly
     
     class Meta:
-        ordering = ['scheduled_date', 'scheduled_time', 'priority']
+        ordering = ['-id','scheduled_date', 'scheduled_time', 'priority']
         verbose_name_plural = 'Task'
         indexes = [
             models.Index(fields=['scheduled_date', 'created_by']),
@@ -104,16 +101,11 @@ class Task(models.Model):
             models.Index(fields=['priority', 'scheduled_date']),
         ]
 
+
     def save(self, *args, **kwargs):
-        # If scheduled_time is a string like "10:00 pm", convert it
+        # Ensure scheduled_time is a datetime.time object
         if isinstance(self.scheduled_time, str):
-            try:
-                self.scheduled_time = datetime.strptime(
-                    self.scheduled_time.strip().lower(), "%I:%M %p"
-                ).time()
-            except ValueError:
-                # If it fails, set None or raise error
-                self.scheduled_time = None
+            self.scheduled_time = convert_to_24hr_format(self.scheduled_time)
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -185,7 +177,7 @@ class Recipe(models.Model):
     
     name = models.CharField(max_length=200, null=True, blank=True)
     meal_type = models.CharField(max_length=200, null=True, blank=True)
-    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='recipes')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='recipes',null=True, blank=True )
     recipy_name = models.JSONField(null=True, blank=True)
     # Ingredients and instructions
     items_available = models.TextField()
@@ -292,3 +284,21 @@ class QRTaskData(models.Model):
 
     def __str__(self):
         return self.title or f"QRTask {self.pk}"
+    
+class PeptalkData(models.Model):
+    title = models.CharField(max_length=200, null=True, blank=True)
+    # contents = models.JSONField(null=True, blank=True)  # store as JSON array
+    # task_metadata = models.ForeignKey(Task, on_delete=models.CASCADE, null=True, blank=True)
+    voice = models.FileField(upload_to='voices/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-id']
+        verbose_name_plural = 'Peptalk Data'
+
+    def __str__(self):
+        return self.title or f"Peptalk {self.pk}"

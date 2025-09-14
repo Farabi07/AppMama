@@ -19,7 +19,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from authentication.decorators import has_permissions
 from authentication.models import Permission
-from authentication.serializers import (AdminUserSerializer, PasswordChangeSerializer, AdminUserListSerializer,UserRegistrationSerializer)
+from authentication.serializers import (AdminUserSerializer, PasswordChangeSerializer, AdminUserListSerializer,UserRegistrationSerializer, UserRelationsSerializer)
 from authentication.filters import UserFilter
 
 from utils.login_logout import get_all_logged_in_users
@@ -30,7 +30,7 @@ import random
 from django.core.mail import send_mail
 
 
-from authentication.models import PasswordResetOTP, User
+from authentication.models import PasswordResetOTP, User, Child, Partner
 from authentication.permissions import IsEmployee, IsAdmin
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
@@ -42,6 +42,13 @@ from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
 from django.utils.timezone import now
 from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.shortcuts import get_object_or_404
+
+from django.contrib.auth import get_user_model
+
 
 # Create your views here.
 User = get_user_model()
@@ -788,3 +795,29 @@ def activate_user(request, uidb64, token):
         return render(request, 'email/activation_success.html')  # ✅ show success page
     else:
         return render(request, 'email/activation_failed.html')  # ❌ show error page
+	
+
+class UserRelationsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]  # Require login; adjust for admin-only access if needed
+
+    def get(self, request, user_pk=None):
+        # If no user_pk provided, default to the current authenticated user
+        if user_pk is None:
+            user = request.user
+        else:
+            user = get_object_or_404(User, pk=user_pk)
+        
+        # Optional: Check if the requester has permission to view this user's data
+        # e.g., if request.user != user and not request.user.is_staff:
+        #     return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+        
+        partners = Partner.objects.filter(user=user)
+        children = Child.objects.filter(user=user)
+        
+        data = {
+            'user': user,
+            'partners': partners,
+            'children': children,
+        }
+        serializer = UserRelationsSerializer(data)
+        return Response(serializer.data, status=status.HTTP_200_OK)

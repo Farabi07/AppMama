@@ -56,14 +56,13 @@ class TaskSerializer(serializers.ModelSerializer):
 		return modelObject
 	
 class RecipeListSerializer(serializers.ModelSerializer):
-	task_category = serializers.SerializerMethodField()
+
 	created_by = serializers.SerializerMethodField()
 	updated_by = serializers.SerializerMethodField()
 	class Meta:
 		model = Recipe
 		fields = '__all__'
-	def get_task_category(self, obj):
-		return obj.task_category.name if obj.task_category else obj.task_category
+
 	def get_created_by(self, obj):
 		return obj.created_by.email if obj.created_by else obj.created_by
 		
@@ -246,3 +245,44 @@ class QRTaskDataSerializer(serializers.ModelSerializer):
                 instance.save()
 
         return instance
+	
+
+class PeptalkListSerializer(serializers.ModelSerializer):
+	
+	created_by = serializers.SerializerMethodField()
+	updated_by = serializers.SerializerMethodField()
+	class Meta:
+		model = PeptalkData
+		fields = '__all__'
+
+	def get_created_by(self, obj):
+		return obj.created_by.email if obj.created_by else obj.created_by
+		
+	def get_updated_by(self, obj):
+		return obj.updated_by.email if obj.updated_by else obj.updated_by
+class PeptalkMinimalListSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = PeptalkData
+		fields = ['id', 'name']
+
+class PeptalkSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = PeptalkData
+		fields = '__all__'
+	
+	def create(self, validated_data):
+		modelObject = super().create(validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.created_by = user
+		modelObject.save()
+		return modelObject
+
+	def update(self, instance, validated_data):
+		modelObject = super().update(instance=instance, validated_data=validated_data)
+		user = get_current_authenticated_user()
+		if user is not None:
+			modelObject.updated_by = user
+		modelObject.save()
+		return modelObject
+	
