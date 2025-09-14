@@ -485,6 +485,7 @@ class LoginHistorySerializer(serializers.ModelSerializer):
 class PasswordChangeSerializer(serializers.Serializer):
 	password = serializers.CharField(max_length=64)
 	confirm_password = serializers.CharField(max_length=64)
+	new_password = serializers.CharField(max_length=64)
 
 
 # for 7days free trail user registration

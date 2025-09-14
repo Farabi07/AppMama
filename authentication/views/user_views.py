@@ -14,7 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
-
+from django.contrib.auth.hashers import make_password, check_password
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from authentication.decorators import has_permissions
@@ -330,51 +330,94 @@ def userHasPermission(request):
 		return Response(response, status=status.HTTP_400_BAD_REQUEST)
 
 
-
-
+@permission_classes([IsAuthenticated])
 @extend_schema(request=PasswordChangeSerializer)
 @api_view(['PATCH'])
 def userPasswordChange(request, pk):
-	try:
-		user = User.objects.get(pk=pk)
-		data = request.data
-		password = data['password']
-		confirm_password = data['confirm_password']
-		response = ''
+    try:
+        # Retrieve the user by pk
+        user = User.objects.get(pk=pk)
+        
+        # Get the current password, new password, and confirm password from the request data
+        data = request.data
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        confirm_password = data.get('confirm_password')
 
-		if password == confirm_password:
-			user.password = make_password(password)
-			user.save()
-			response = {'detail': f"User Id - {pk}'s password has been changed successfully."}
-			return Response(response, status=status.HTTP_200_OK)
-		else:
-			response = {'detail': f"Password does not match."}
-			return Response(response, status=status.HTTP_400_BAD_REQUEST)
-	except ObjectDoesNotExist:
-		response = {'detail': f"User id - {pk} doesn't exists"}
-		return Response(response, status=status.HTTP_400_BAD_REQUEST)
+        # Check if any of the fields are missing
+        if not current_password or not new_password or not confirm_password:
+            return Response({'detail': 'current_password, new_password, and confirm_password are required.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify if the current password matches the user's existing password
+        if not check_password(current_password, user.password):
+            return Response({'detail': 'The current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if the new password matches the confirm password
+        if new_password != confirm_password:
+            return Response({'detail': 'The new password and confirm password do not match.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Update the user's password
+        user.password = make_password(new_password)
+        user.save()
+
+        return Response({'detail': f"User Id - {pk}'s password has been changed successfully."},
+                        status=status.HTTP_200_OK)
+    
+    except ObjectDoesNotExist:
+        return Response({'detail': f"User id - {pk} doesn't exist."}, status=status.HTTP_404_NOT_FOUND)
+    
+    except Exception as e:
+        return Response({'detail': f'An error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
-
+@permission_classes([IsAuthenticated])
 @api_view(['POST'])
 def userImageUpload(request, pk):
     print("FILES:", request.FILES)
     print("DATA:", request.data)
+    
     try:
         user = User.objects.get(pk=pk)
-        # Use request.FILES for file uploads
+        
+        # Get the uploaded image from request.FILES
         image = request.FILES.get('image')
+        full_name = request.data.get('full_name')  # Get the full name from request.data
+        
+        # Check if image is uploaded
         if image:
             user.image = image
-            user.save()
-            return Response(user.image.url, status=status.HTTP_200_OK)
         else:
             response = {'detail': "Please upload a valid image"}
             return Response(response, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if full_name is provided, and update it
+        if full_name:
+            user.full_name = full_name
+        else:
+            response = {'detail': "Please provide a full name"}
+            return Response(response, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save the user instance with the updated image and full name
+        user.save()
+        
+        # Return the image URL and full name as part of the response
+        response_data = {
+            'image_url': user.image.url if user.image else None,
+            'full_name': user.full_name
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+
     except ObjectDoesNotExist:
-        response = {'detail': f"User id - {pk} doesn't exists"}
-        return Response(response, status=status.HTTP_400_BAD_REQUEST)
+        response = {'detail': f"User id - {pk} doesn't exist"}
+        return Response(response, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        response = {'detail': f'An error occurred: {str(e)}'}
+        return Response(response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
