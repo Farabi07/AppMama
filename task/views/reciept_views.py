@@ -297,6 +297,7 @@ def deleteReceipt(request, pk):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def listReceipts(request):
     receipt_type = request.GET.get("type")  # "expense", "sales", or None
     page = int(request.GET.get("page", 1))  # default page = 1
@@ -304,9 +305,9 @@ def listReceipts(request):
 
     # Filter by type if provided
     if receipt_type:
-        if receipt_type not in ["expense", "sales"]:
+        if receipt_type not in ["expense", "sales", "pantry"]:
             return JsonResponse(
-                {"error": "Invalid type. Use 'expense' or 'sales'"},
+                {"error": "Invalid type. Use 'expense', 'sales', or 'pantry'"},
                 status=400
             )
         receipts = Receipt.objects.filter(receipt_type=receipt_type)

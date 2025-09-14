@@ -225,7 +225,7 @@ def save_recipe_from_ai_response(recipe_data, task=None, user=None):
 #         comment=user_input + "\n\n" + response['response'],
 #         created_at=timezone.now(),
 #     )
- 
+@permission_classes([IsAuthenticated])
 class ReceiptUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
  
@@ -343,6 +343,7 @@ from openai import OpenAI
 client = OpenAI()
  
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def receipt_preview(request):
     image = request.FILES.get("image")
@@ -404,17 +405,19 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
  
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 @parser_classes([JSONParser])
 def save_final_receipt(request):
     data = request.data
     receipt_type = data.get("receipt_type")
- 
-    if receipt_type not in ["expense", "sales"]:
+    
+    # Validate the receipt_type to include "expense", "sales", and "pantry"
+    if receipt_type not in ["expense", "sales", "pantry"]:
         return JsonResponse(
-            {"error": "Invalid receipt_type. Must be 'expense' or 'sales'"},
+            {"error": "Invalid receipt_type. Must be 'expense', 'sales', or 'pantry'"},
             status=400
         )
- 
+    
     receipt = Receipt.objects.create(
         date=data.get("date", ""),
         time=data.get("time", ""),
@@ -434,7 +437,7 @@ def save_final_receipt(request):
         processed_at=datetime.now(),
         receipt_type=receipt_type  # ✅ store type here
     )
- 
+    
     return JsonResponse(
         {
             "message": f"{receipt_type.title()} receipt saved successfully",
