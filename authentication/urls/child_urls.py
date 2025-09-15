@@ -22,7 +22,7 @@ urlpatterns = [
  	path('api/v1/child/login/', views.ChildLogin, name='child-login'),
  
  	path('api/v1/user/ChildImageUpload/<int:pk>/',views.ChildImageUpload),
-  
-  	
+
+	path('api/v1/child/change_password/<int:pk>/', views.childPasswordChange),
 
 ]

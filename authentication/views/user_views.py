@@ -382,25 +382,24 @@ def userImageUpload(request, pk):
     try:
         user = User.objects.get(pk=pk)
         
-        # Get the uploaded image from request.FILES
+        # Get the uploaded image from request.FILES (if present)
         image = request.FILES.get('image')
-        full_name = request.data.get('full_name')  # Get the full name from request.data
+        # Get the full name from request.data (if present)
+        full_name = request.data.get('full_name')
         
-        # Check if image is uploaded
+        # Update image if provided
         if image:
             user.image = image
-        else:
-            response = {'detail': "Please upload a valid image"}
-            return Response(response, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if full_name is provided, and update it
+        # Update full_name if provided
         if full_name:
             user.full_name = full_name
-        else:
-            response = {'detail': "Please provide a full name"}
+
+        # If neither image nor full_name is provided, return an error
+        if not image and not full_name:
+            response = {'detail': "Please provide either an image or a full name"}
             return Response(response, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save the user instance with the updated image and full name
+        # Save the user instance with the updated fields
         user.save()
         
         # Return the image URL and full name as part of the response

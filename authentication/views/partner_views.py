@@ -237,24 +237,50 @@ def deletePartner(request, pk):
 		return Response({'detail': f"Partner id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@api_view(['PATCH'])
 def PartnerImageUpload(request, pk):
     print("FILES:", request.FILES)
     print("DATA:", request.data)
+    
     try:
-        Partner = Partner.objects.get(pk=pk)
-        # Use request.FILES for file uploads
+        partner = Partner.objects.get(pk=pk)
+        
+        # Get the uploaded image from request.FILES (if present)
         image = request.FILES.get('image')
+        # Get the full name from request.data (if present)
+        name = request.data.get('name')
+        
+        # Update image if provided
         if image:
-            Partner.image = image
-            Partner.save()
-            return Response(Partner.image.url, status=status.HTTP_200_OK)
-        else:
-            response = {'detail': "Please upload a valid image"}
+            partner.image = image
+        # Update name if provided
+        if name:
+            partner.name = name
+
+        # If neither image nor name is provided, return an error
+        if not image and not name:
+            response = {'detail': "Please provide either an image or a name"}
             return Response(response, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save the partner instance with the updated fields
+        partner.save()
+
+        # Return the image URL and name as part of the response
+        response_data = {
+            'image_url': partner.image.url if partner.image else None,
+            'name': partner.name
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
     except ObjectDoesNotExist:
-        response = {'detail': f"User id - {pk} doesn't exists"}
-        return Response(response, status=status.HTTP_400_BAD_REQUEST)
+        response = {'detail': f"Child id - {pk} doesn't exist"}
+        return Response(response, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        response = {'detail': f'An error occurred: {str(e)}'}
+        return Response(response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -297,3 +323,43 @@ def PartnerLogin(request):
 
 
 
+@permission_classes([IsAuthenticated])
+@extend_schema(request=PasswordChangeSerializer)
+@api_view(['PATCH'])
+def partnerPasswordChange(request, pk):
+    try:
+        # Retrieve the partner by pk
+        partner = Partner.objects.get(pk=pk)
+
+        # Get the current password, new password, and confirm password from the request data
+        data = request.data
+        password = data.get('current_password')
+        new_password = data.get('new_password')
+        confirm_password = data.get('confirm_password')
+
+        # Check if any of the fields are missing
+        if not password or not new_password or not confirm_password:
+            return Response({'detail': 'current_password, new_password, and confirm_password are required.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify if the current password matches the partner's existing password
+        if not check_password(password, partner.password):
+            return Response({'detail': 'The current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if the new password matches the confirm password
+        if new_password != confirm_password:
+            return Response({'detail': 'The new password and confirm password do not match.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Update the partner's password
+        partner.password = make_password(new_password)
+        partner.save()
+
+        return Response({'detail': f"Partner Id - {pk}'s password has been changed successfully."},
+                        status=status.HTTP_200_OK)
+    
+    except ObjectDoesNotExist:
+        return Response({'detail': f"Partner id - {pk} doesn't exist."}, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        return Response({'detail': f'An error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

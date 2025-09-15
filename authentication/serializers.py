@@ -719,6 +719,8 @@ class PartnerListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Partner
         fields = '__all__'
+        
+
 class PartnerSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     designation = serializers.CharField(source='designation.name', read_only=True)
@@ -784,6 +786,16 @@ class PartnerSerializer(serializers.ModelSerializer):
         rep['role'] = instance.role
         rep['designation'] = instance.designation.name if instance.designation else None
         return rep
+class PartnerMinimalSerializer(serializers.ModelSerializer):
+    designation = serializers.CharField(source='designation.name', read_only=True)
+
+    class Meta:
+        model = Partner
+        # Keep all fields except password
+        fields = [
+            'id', 'name', 'designation', 'email', 'phone', 'role', 'image',
+            'created_at', 'updated_at', 'created_by', 'updated_by', 'user'
+        ]	
 class ChildListSerializer(serializers.ModelSerializer):
     created_by = AdminUserMinimalListSerializer()
     updated_by = AdminUserMinimalListSerializer()
@@ -792,6 +804,8 @@ class ChildListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Partner
         fields = '__all__'
+
+
 class ChildSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     designation = serializers.CharField(source='designation.name', read_only=True)
@@ -857,10 +871,21 @@ class ChildSerializer(serializers.ModelSerializer):
         rep['role'] = instance.role
         rep['designation'] = instance.designation.name if instance.designation else None
         return rep
+	
+class ChildMinimalSerializer(serializers.ModelSerializer):
+    designation = serializers.CharField(source='designation.name', read_only=True)
+
+    class Meta:
+        model = Child
+        # Keep all fields except password
+        fields = [
+            'id', 'name', 'designation', 'email', 'phone', 'role', 'image',
+            'created_at', 'updated_at', 'created_by', 'updated_by', 'user'
+        ]
 class UserRelationsSerializer(serializers.Serializer):
     user = serializers.SerializerMethodField()
-    partners = PartnerListSerializer(many=True)
-    children = ChildListSerializer(many=True)  # Note: 'children' for clarity, even if related_name is 'childs'
+    partners = PartnerMinimalSerializer(many=True)
+    children = ChildMinimalSerializer(many=True)
 
     def get_user(self, obj):
         # Return basic user info (customize as needed)
@@ -868,4 +893,18 @@ class UserRelationsSerializer(serializers.Serializer):
         return {
             'id': user.id,
             'username': user.username,  # Add more fields if needed (e.g., email)
+            'full_name': user.full_name,
+            'email': user.email,
+            'gender': user.gender,
+			'role': user.role,
+            'image': user.image.url if user.image else None
         }
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        # Remove the token from the response if it's included
+        representation.pop('refresh', None)
+        representation.pop('access', None)
+
+        return representation

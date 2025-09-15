@@ -22,6 +22,8 @@ urlpatterns = [
  	path('api/v1/partner/login/', views.PartnerLogin, name='partner-login'),
  
  	path('api/v1/user/PartnerImageUpload/<int:pk>/',views.PartnerImageUpload),
+     
+	path('api/v1/partner/change_password/<int:pk>/', views.partnerPasswordChange),
   
   	
 

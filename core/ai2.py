@@ -19,7 +19,6 @@ warnings.filterwarnings("ignore")
 
 # 🔑 Initialize OpenAI client
 
-
 # 🎙️ Voice Recording Configuration
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
