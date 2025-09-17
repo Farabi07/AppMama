@@ -403,21 +403,28 @@ def receipt_preview(request):
  
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
- 
+@csrf_exempt
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @parser_classes([JSONParser])
-def save_final_receipt(request):
-    data = request.data
-    receipt_type = data.get("receipt_type")
-    
-    # Validate the receipt_type to include "expense", "sales", and "pantry"
-    if receipt_type not in ["expense", "sales", "pantry"]:
+def save_receipt_by_type(request, receipt_type):
+    # Validate that the receipt_type is one of the allowed types
+    if receipt_type not in ["sales", "expense", "pantry"]:
         return JsonResponse(
-            {"error": "Invalid receipt_type. Must be 'expense', 'sales', or 'pantry'"},
+            {"error": "Invalid receipt_type. Must be 'sales', 'expense', or 'pantry'"},
             status=400
         )
-    
+
+    # Extract data from the request
+    data = request.data
+
+    # Validate required fields
+    required_fields = ["date", "time", "shop_name", "address", "payment_method", "items", "subtotal", "total_cost"]
+    for field in required_fields:
+        if field not in data:
+            return JsonResponse({"error": f"Missing required field: {field}"}, status=400)
+
+    # Save the receipt data into the database
     receipt = Receipt.objects.create(
         date=data.get("date", ""),
         time=data.get("time", ""),
@@ -435,13 +442,12 @@ def save_final_receipt(request):
         total_cost=data.get("total_cost", 0.0),
         extracted_data=data,
         processed_at=datetime.now(),
-        receipt_type=receipt_type  # ✅ store type here
+        receipt_type=receipt_type  # Set the receipt_type from the URL
     )
-    
+
+    # Return a success message with the receipt ID
     return JsonResponse(
-        {
-            "message": f"{receipt_type.title()} receipt saved successfully",
-            "receipt_id": receipt.id
-        },
+        {"message": f"{receipt_type.title()} receipt saved successfully", "receipt_id": receipt.id},
         status=201
     )
+

@@ -374,7 +374,7 @@ def userPasswordChange(request, pk):
 
 
 @permission_classes([IsAuthenticated])
-@api_view(['POST'])
+@api_view(['PATCH'])
 def userImageUpload(request, pk):
     print("FILES:", request.FILES)
     print("DATA:", request.data)
