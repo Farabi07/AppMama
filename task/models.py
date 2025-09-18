@@ -205,6 +205,7 @@ class Receipt(models.Model):
     RECEIPT_TYPES = (
         ("expense", "Expense"),
         ("sales", "Sales"),
+        ("pantry", "Pantry"),
     )
     
     # Basic information from the receipt
@@ -251,6 +252,7 @@ class Receipt(models.Model):
         super().save(*args, **kwargs)
 
 class Client(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="clients", null=True, blank=True)
     name = models.CharField(max_length=200, null=True, blank=True)
     date_of_interaction = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

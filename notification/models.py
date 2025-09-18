@@ -20,3 +20,18 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.user} regarding task {self.task.task_name}"
+
+
+class Contact(models.Model):
+    name = models.CharField(max_length=255, blank=True, null=True)
+    email = models.EmailField(max_length=255, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    type = models.CharField(max_length=10, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.type})"
+    
+    class Meta:
+        verbose_name = "Contact"
+        verbose_name_plural = "Contacts"

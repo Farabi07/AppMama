@@ -30,10 +30,10 @@ from commons.pagination import Pagination
 	responses=ClientSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllClient(request):
-	clients = Client.objects.all()
+	clients = Client.objects.filter(user=request.user)
 	total_elements = clients.count()
 
 	page = request.query_params.get('page')
@@ -146,6 +146,7 @@ def createClient(request):
 	for key, value in data.items():
 		if value != '' and value != '0':
 			filtered_data[key] = value
+	filtered_data['user'] = request.user 
 
 	serializer = ClientSerializer(data=filtered_data)
 

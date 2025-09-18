@@ -24,7 +24,9 @@ urlpatterns = [
     
 	path('api/v1/reciept/monthly_statistics/', views.monthly_statistics, name='monthly-statistics'),
 
-	# path('receipt/<int:receipt_id>/add-item/', views.addItemtoReceipt, name='add-item-to-receipt'),
+
+
+	path('api/v1/reciept/add-item/<int:receipt_id>', views.addItemtoReceipt, name='add-item-to-receipt'),
 
 	# path('receipt/<int:receipt_id>/<str:type_str>/<int:index>/update/', views.updateItemOrService, name='update-item-service'),
     # path('receipt/<int:receipt_id>/<str:type_str>/<int:index>/delete/', views.deleteItemOrService, name='delete-item-service'),

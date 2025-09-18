@@ -11,7 +11,7 @@ from django.http import JsonResponse
 
 from authentication.decorators import has_permissions
 from task.models import Receipt
-from task.serializers import ReceiptSerializer, ReceiptListSerializer
+from task.serializers import ReceiptSerializer, ReceiptListSerializer,ReceiptCustomSerializer
 from task.filters import ReceiptFilter
 
 from commons.enums import PermissionEnum
@@ -27,8 +27,8 @@ from datetime import datetime, timedelta
         OpenApiParameter("page"),
         OpenApiParameter("size"),
     ],
-    request=ReceiptSerializer,
-    responses=ReceiptSerializer
+    request=ReceiptListSerializer,
+    responses=ReceiptListSerializer
 )
 @api_view(['GET'])
 # @permission_classes([IsAuthenticated])
@@ -164,25 +164,83 @@ def createReceipt(request):
 
 
 
+# @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
+# @api_view(['PUT'])
+# # @permission_classes([IsAuthenticated])
+# # @has_permissions([PermissionEnum.PERMISSION_UPDATE.name, PermissionEnum.PERMISSION_PARTIAL_UPDATE.name])
+# def updateReceipt(request, pk):
+#     try:
+#         # Fetch the existing receipt object
+#         receipt = Receipt.objects.get(pk=pk)
+
+#         # Get the updated data from the request
+#         data = request.data
+
+#         # Remove 'extracted_data' from the incoming data if it's there
+#         data.pop('extracted_data', None)
+
+#         # Use the serializer for partial update (allow updating only the provided fields)
+#         serializer = ReceiptSerializer(receipt, data=data, partial=True)
+
+#         if serializer.is_valid():
+#             # Save the updated receipt
+#             serializer.save()
+
+#             return Response(serializer.data, status=status.HTTP_200_OK)
+#         else:
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#     except ObjectDoesNotExist:
+#         return Response({"detail": f"Receipt with id {pk} does not exist."}, status=status.HTTP_404_NOT_FOUND)
 @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
 @api_view(['PUT'])
-@permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_UPDATE.name, PermissionEnum.PERMISSION_PARTIAL_UPDATE.name])
-def updateReceipt(request,pk):
-	try:
-		city = Receipt.objects.get(pk=pk)
-		data = request.data
-		serializer = ReceiptSerializer(city, data=data)
-		if serializer.is_valid():
-			serializer.save()
-			return Response(serializer.data, status=status.HTTP_200_OK)
-		else:
-			return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-	except ObjectDoesNotExist:
-		return Response({'detail': f"Receipt id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
+def updateReceipt(request, pk):
+    try:
+        # Fetch the existing receipt object
+        receipt = Receipt.objects.get(pk=pk)
 
+        # Get the updated data from the request
+        data = request.data
 
+        # Remove 'extracted_data' from the incoming data if it's there
+        data.pop('extracted_data', None)
 
+        # Handle the update for items
+        if 'items' in data:
+            # Get the current items list
+            current_items = receipt.items or []
+
+            # Modify items: Add new, update, or delete items
+            updated_items = data.get('items', [])
+
+            # Handle deletion by comparing current items and updated items
+            # For simplicity, we'll assume that items have a unique identifier such as 'name'
+            # If your items have an 'id' field, use that instead of 'name'
+            for item in current_items[:]:
+                if item not in updated_items:
+                    current_items.remove(item)
+
+            # Add new items that are not already in the current list
+            for item in updated_items:
+                if item not in current_items:
+                    current_items.append(item)
+
+            # Set the updated items list
+            receipt.items = current_items
+
+        # Use the serializer for partial update (allow updating only the provided fields)
+        serializer = ReceiptSerializer(receipt, data=data, partial=True)
+
+        if serializer.is_valid():
+            # Save the updated receipt
+            serializer.save()
+
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    except ObjectDoesNotExist:
+        return Response({"detail": f"Receipt with id {pk} does not exist."}, status=status.HTTP_404_NOT_FOUND)
 
 @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
 @api_view(['DELETE'])
@@ -196,33 +254,36 @@ def deleteReceipt(request, pk):
 	except ObjectDoesNotExist:
 		return Response({'detail': f"Receipt id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
-# @api_view(['POST'])
-# def addItemtoReceipt(request, receipt_id):
-#     """
-#     Add a new item to an existing receipt
-#     """
-#     receipt = get_object_or_404(Receipt, id=receipt_id)
 
-#     name = request.data.get("name")
-#     qty = request.data.get("qty", 1)
+@extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+def addItemtoReceipt(request, receipt_id):
+    """
+    Add a new item to an existing receipt
+    """
+    receipt = get_object_or_404(Receipt, id=receipt_id)
 
-#     if not name:
-#         return Response({"error": "Item name is required"}, status=status.HTTP_400_BAD_REQUEST)
+    name = request.data.get("name")
+    qty = request.data.get("qty", 1)
 
-#     # Prepare new item dictionary
-#     new_item = {
-#         "name": name,
-#         "quantity": qty
-#     }
+    if not name:
+        return Response({"error": "Item name is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-#     # Append to existing items
-#     receipt.items = (receipt.items or []) + [new_item]
-#     receipt.save()
+    # Prepare new item dictionary
+    new_item = {
+        "name": name,
+        "quantity": qty
+    }
 
-#     return Response({
-#         "message": "Item added successfully",
-#         "items": receipt.items
-#     }, status=status.HTTP_200_OK)
+    # Append to existing items
+    receipt.items = (receipt.items or []) + [new_item]
+    receipt.save()
+
+    return Response({
+        "message": "Item added successfully",
+        "items": receipt.items
+    }, status=status.HTTP_200_OK)
 
 # @api_view(['PUT'])
 # def updateItemOrService(request, receipt_id, type_str, index):
@@ -296,59 +357,62 @@ def deleteReceipt(request, pk):
 
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@extend_schema(
+    parameters=[
+        OpenApiParameter("page", type=int, description="Page number"),
+        OpenApiParameter("size", type=int, description="Page size")
+    ],
+    request=ReceiptListSerializer,
+    responses=ReceiptListSerializer
+)
+@extend_schema(
+    parameters=[
+        OpenApiParameter("page", type=int, description="Page number"),
+        OpenApiParameter("size", type=int, description="Page size")
+    ],
+    request=ReceiptListSerializer,
+    responses=ReceiptListSerializer
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])  # Uncomment if you need permission checks
 def listReceipts(request):
     receipt_type = request.GET.get("type")  # "expense", "sales", or None
-    page = int(request.GET.get("page", 1))  # default page = 1
-    page_size = int(request.GET.get("page_size", 10))  # default 10 per page
+    page = int(request.GET.get("page", 1))  # Default page = 1
+    page_size = int(request.GET.get("size", 10))  # Default 10 per page
 
-    # Filter by type if provided
+    # Filter by receipt_type if provided
     if receipt_type:
         if receipt_type not in ["expense", "sales", "pantry"]:
-            return JsonResponse(
+            return Response(
                 {"error": "Invalid type. Use 'expense', 'sales', or 'pantry'"},
-                status=400
+                status=status.HTTP_400_BAD_REQUEST
             )
         receipts = Receipt.objects.filter(receipt_type=receipt_type)
     else:
         receipts = Receipt.objects.all()
 
+    # Pagination
     total_count = receipts.count()
-    start = (page - 1) * page_size
-    end = start + page_size
-    receipts = receipts[start:end]
+    pagination = Pagination()  # Assuming you have a custom Pagination class
+    pagination.page = page
+    pagination.size = page_size
 
-    data = []
-    for r in receipts:
-        data.append({
-            "id": r.id,
-            "receipt_type": r.receipt_type,
-            "date": r.date,
-            "time": r.time,
-            "shop_name": r.shop_name,
-            "address": r.address,
-            "payment_method": r.payment_method,
-            "items": r.items,
-            "services": r.services,
-            "vat_percentage": r.vat_percentage,
-            "vat_amount": r.vat_amount,
-            "subtotal": r.subtotal,
-            "tax": r.tax,
-            "discount": r.discount,
-            "quantity": r.quantity,
-            "total_cost": r.total_cost,
-        })
+    # Paginate the queryset
+    receipts = pagination.paginate_data(receipts)
 
-    return JsonResponse({
-        "total_count": total_count,
-        "page": page,
-        "page_size": page_size,
-        "results": data
-    }, status=200)
+    # Serialize the paginated receipts
+    serializer = ReceiptCustomSerializer(receipts, many=True)
 
+    # Prepare the response data
+    response = {
+        'reciept': serializer.data,  # Returning the serialized receipt data
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_count,
+    }
 
-
+    return Response(response, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 def monthly_report(request):
@@ -482,3 +546,4 @@ def monthly_statistics(request):
         })
 
     return Response({"monthly_data": monthly_data}, status=200)
+

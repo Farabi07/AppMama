@@ -158,7 +158,17 @@ class ReceiptMinimalListSerializer(serializers.ModelSerializer):
 		model = Receipt
 		fields = ['id', 'name']
 
+class ReceiptCustomSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Receipt
+        fields = ['id', 'receipt_type', 'date', 'time', 'shop_name', 'address', 'payment_method', 'items', 'services', 
+                  'vat_percentage', 'vat_amount', 'subtotal', 'tax', 'discount', 'total_cost']  # Specify only the required fields
 
+    # If you want to exclude 'extracted_data' and handle it in the view, don't include it in the serializer
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # Optionally, handle removing fields or modify data here
+        return representation
 class ReceiptSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Receipt
@@ -179,6 +189,10 @@ class ReceiptSerializer(serializers.ModelSerializer):
 			modelObject.updated_by = user
 		modelObject.save()
 		return modelObject
+	def to_representation(self, instance):
+		representation = super().to_representation(instance)
+		representation.pop('extracted_data', None)  # Remove 'extracted_data' from the response
+		return representation
 
 
 
