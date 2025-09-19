@@ -22,4 +22,6 @@ urlpatterns = [
 
 	path('api/v1/task/today/', views.getTodayTask),
 
+	path('api/v1/task/all/health/', views.getAllHealthTask, name='get_health_tasks'),
+
 ]

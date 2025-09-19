@@ -137,7 +137,7 @@ def searchClient(request):
 
 @extend_schema(request=ClientSerializer, responses=ClientSerializer)
 @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_CREATE.name])
 def createClient(request):
 	data = request.data
@@ -146,7 +146,7 @@ def createClient(request):
 	for key, value in data.items():
 		if value != '' and value != '0':
 			filtered_data[key] = value
-	filtered_data['user'] = request.user 
+	filtered_data['user'] = request.user.id 
 
 	serializer = ClientSerializer(data=filtered_data)
 

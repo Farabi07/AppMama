@@ -233,3 +233,44 @@ def getTodayTask(request):
     }
 
     return Response(response, status=status.HTTP_200_OK)
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter("page"),
+        OpenApiParameter("size"),
+    ],
+    request=TaskListSerializer,
+    responses=TaskListSerializer
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])  
+def getAllHealthTask(request): 
+    
+    tasks = Task.objects.filter(created_by=request.user, task_category="health task")
+
+    total_elements = tasks.count()
+
+    # Retrieve pagination parameters from query parameters
+    page = request.query_params.get('page', 1)  # Default to page 1 if not provided
+    size = request.query_params.get('size', 10)  # Default to 10 tasks per page if not provided
+
+    # Pagination logic
+    pagination = Pagination()
+    pagination.page = page
+    pagination.size = size
+    tasks = pagination.paginate_data(tasks)
+
+    # Serialize the task data
+    serializer = TaskListSerializer(tasks, many=True)
+
+    # Prepare the response
+    response = {
+        'tasks': serializer.data,
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_elements,
+    }
+
+    return Response(response, status=status.HTTP_200_OK)
+

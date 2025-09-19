@@ -19,7 +19,7 @@ from django.template.loader import render_to_string
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
-        fields = ['id', 'task', 'message', 'read', 'created_at', 'updated_at']
+        fields = ['id', 'task', 'message', 'read', 'created_at', 'updated_at', 'created_by', 'updated_by']
 
 
 class ContactListSerializer(serializers.ModelSerializer):

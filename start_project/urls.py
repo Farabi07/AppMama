@@ -35,7 +35,7 @@ urlpatterns = [
     path('reciept/', include('task.urls.reciept_urls')),
     path('qrcode/', include('task.urls.qrcode_urls')),
     path('peptalk/', include('task.urls.peptalk_urls')),
-    path('notifications/', include('task.urls.notifications_urls')),
+    path('notifications/', include('notification.urls.notifications_urls')),
     path('contacts/', include('notification.urls.contacts_urls')),
     # AI module
     path('core/', include('core.urls')),

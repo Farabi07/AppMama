@@ -110,12 +110,12 @@ def getAContact(request, pk):
 # @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_DETAILS_VIEW.name])
 def searchContact(request):
-	cities = ContactFilter(request.GET, queryset=Contact.objects.all())
-	cities = cities.qs
+	contacts = ContactFilter(request.GET, queryset=Contact.objects.all())
+	contacts = contacts.qs
 
-	print('searched_products: ', cities)
+	print('searched_products: ', contacts)
 
-	total_elements = cities.count()
+	total_elements = contacts.count()
 
 	page = request.query_params.get('page')
 	size = request.query_params.get('size')
@@ -124,22 +124,22 @@ def searchContact(request):
 	pagination = Pagination()
 	pagination.page = page
 	pagination.size = size
-	cities = pagination.paginate_data(cities)
+	contacts = pagination.paginate_data(contacts)
 
-	serializer = ContactListSerializer(cities, many=True)
+	serializer = ContactListSerializer(contacts, many=True)
 
 	response = {
-		'cities': serializer.data,
+		'contacts': serializer.data,
 		'page': pagination.page,
 		'size': pagination.size,
 		'total_pages': pagination.total_pages,
 		'total_elements': total_elements,
 	}
 
-	if len(cities) > 0:
+	if len(contacts) > 0:
 		return Response(response, status=status.HTTP_200_OK)
 	else:
-		return Response({'detail': f"There are no cities matching your search"}, status=status.HTTP_400_BAD_REQUEST)
+		return Response({'detail': f"There are no contacts matching your search"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -149,20 +149,30 @@ def searchContact(request):
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_CREATE.name])
 def createContact(request):
-	data = request.data
-	filtered_data = {}
+    data = request.data
 
-	for key, value in data.items():
-		if value != '' and value != '0':
-			filtered_data[key] = value
+    # Dynamically get all the fields from the Contact model
+    filtered_data = {}
+    model_fields = Contact._meta.get_fields()
 
-	serializer = ContactSerializer(data=filtered_data)
+    for field in model_fields:
+        field_name = field.name
+        if field_name in data:
+            filtered_data[field_name] = data[field_name]
+    
+    # Add user to the data manually, if necessary
+    filtered_data['user'] = request.user.id
 
-	if serializer.is_valid():
-		serializer.save()
-		return Response(serializer.data, status=status.HTTP_201_CREATED)
-	else:
-		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # Use the custom ContactSerializer
+    serializer = ContactSerializer(data=filtered_data)
+
+    if serializer.is_valid():
+        contact = serializer.save()  # This will trigger the create method in the serializer
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    else:
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 

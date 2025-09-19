@@ -2,9 +2,39 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from notification.models import Notification
-from authentication.models import Child, Partner
-from django.http import JsonResponse
 
+
+from drf_spectacular.utils import  extend_schema, OpenApiParameter
+
+from authentication.decorators import has_permissions
+from notification.models import Contact
+from notification.serializers import ContactSerializer, ContactListSerializer
+from notification.filters import ContactFilter
+
+from commons.enums import PermissionEnum
+from commons.pagination import Pagination
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from notification.models import Notification
+from notification.serializers import NotificationSerializer
+from rest_framework.response import Response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_unseen_notifications(request):
+    notifications = Notification.objects.filter(user=request.user, read=False).order_by('-created_at')
+    serializer = NotificationSerializer(notifications, many=True)
+    return Response(serializer.data)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_notification_as_read(request, notification_id):
+    try:
+        notification = Notification.objects.get(id=notification_id, user=request.user)
+        notification.read = True
+        notification.save()
+        return Response({'detail': 'Notification marked as read.'})
+    except Notification.DoesNotExist:
+        return Response({'error': 'Notification not found.'}, status=404)
 class NotificationView(APIView):
     permission_classes = [IsAuthenticated]
 

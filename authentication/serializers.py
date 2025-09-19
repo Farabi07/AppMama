@@ -711,8 +711,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
         return rep
 
 class PartnerListSerializer(serializers.ModelSerializer):
-    created_by = AdminUserMinimalListSerializer()
-    updated_by = AdminUserMinimalListSerializer()
+    created_by = serializers.SerializerMethodField()
+    updated_by = serializers.SerializerMethodField()
     # role = RoleMinimalListSerializer()
     designation = DesignationMinimalListSerializer()
 
@@ -797,9 +797,8 @@ class PartnerMinimalSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'created_by', 'updated_by', 'user'
         ]	
 class ChildListSerializer(serializers.ModelSerializer):
-    created_by = AdminUserMinimalListSerializer()
-    updated_by = AdminUserMinimalListSerializer()
-    # role = RoleMinimalListSerializer()
+    created_by = serializers.SerializerMethodField()
+    updated_by = serializers.SerializerMethodField()
     designation = DesignationMinimalListSerializer()
     class Meta:
         model = Partner
@@ -871,10 +870,11 @@ class ChildSerializer(serializers.ModelSerializer):
         rep['role'] = instance.role
         rep['designation'] = instance.designation.name if instance.designation else None
         return rep
-	
-class ChildMinimalSerializer(serializers.ModelSerializer):
-    designation = serializers.CharField(source='designation.name', read_only=True)
 
+class ChildMinimalSerializer(serializers.ModelSerializer):
+    created_by = serializers.SerializerMethodField()
+    updated_by = serializers.SerializerMethodField()
+    designation = DesignationMinimalListSerializer()
     class Meta:
         model = Child
         # Keep all fields except password
