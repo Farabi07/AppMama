@@ -882,6 +882,13 @@ class ChildMinimalSerializer(serializers.ModelSerializer):
             'id', 'name', 'designation', 'email', 'phone', 'role', 'image',
             'created_at', 'updated_at', 'created_by', 'updated_by', 'user'
         ]
+
+    def get_created_by(self, obj):
+        return obj.created_by.email if obj.created_by else obj.created_by
+
+    def get_updated_by(self, obj):
+        return obj.updated_by.email if obj.updated_by else obj.updated_by
+
 class UserRelationsSerializer(serializers.Serializer):
     user = serializers.SerializerMethodField()
     partners = PartnerMinimalSerializer(many=True)

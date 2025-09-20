@@ -12,7 +12,12 @@ from django.shortcuts import render, get_object_or_404
 from task.models import QRTaskData
 from django.http import HttpResponse
 from datetime import datetime
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import permission_classes
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
+@extend_schema(request=QRTaskDataSerializer, responses=QRTaskDataSerializer)
+@permission_classes([IsAuthenticated])
 @api_view(['POST'])
 @parser_classes([JSONParser, MultiPartParser, FormParser])
 def createQRTaskData(request):
@@ -77,7 +82,9 @@ def createQRTaskData(request):
         }, status=status.HTTP_201_CREATED)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+# @extend_schema(request=QRTaskDataSerializer, responses=QRTaskDataSerializer)
+# @permission_classes([IsAuthenticated])
+# @api_view(['POST'])
 def qr_task_view(request, pk):
     qr_task = get_object_or_404(QRTaskData, pk=pk)
     content = {

@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/v1/notifications/', views.NotificationView.as_view()),
     path('api/mark-read/<int:notification_id>/', views.mark_notification_as_read),
     path('api/v1/unseen_notifications/list/', views.get_unseen_notifications, name='list-notifications'),
+    path('api/task/reminders/', views.task_reminder_view, name='task-reminders'),
 
 
 

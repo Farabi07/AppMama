@@ -11,6 +11,7 @@ class Notification(models.Model):
     child = models.ForeignKey(Child, null=True, blank=True, on_delete=models.CASCADE, related_name='child_notifications')
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='notifications_task', null=True, blank=True)
     message = models.TextField()
+    assigned_to_type = models.CharField(max_length=20, blank=True, null=True)
     read = models.BooleanField(default=False)  # Whether the notification is read by the user
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

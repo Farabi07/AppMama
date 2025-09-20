@@ -143,20 +143,24 @@ def searchTask(request):
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_CREATE.name])
 def createTask(request):
-	data = request.data
-	filtered_data = {}
+    data = request.data
+    filtered_data = {}
 
-	for key, value in data.items():
-		if value != '' and value != '0':
-			filtered_data[key] = value
+    # Ensure the 'user' field is assigned the current user
+    filtered_data['user'] = request.user  # Assign current user
 
-	serializer = TaskSerializer(data=filtered_data)
+    for key, value in data.items():
+        if value != '' and value != '0':
+            filtered_data[key] = value
 
-	if serializer.is_valid():
-		serializer.save()
-		return Response(serializer.data, status=status.HTTP_201_CREATED)
-	else:
-		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # Now create the task with the current user already set
+    serializer = TaskSerializer(data=filtered_data)
+
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    else:
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 

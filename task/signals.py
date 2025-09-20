@@ -85,21 +85,35 @@ def create_notification_on_task_create(sender, instance, created, **kwargs):
 
         logger.info(f"Signal triggered for task: {task_name} with assigned type: {assigned_to_type}")
 
-        # Only children created by current user
         if assigned_to_type == 'child':
-            children = Child.objects.filter(created_by=task.created_by)
+            children = Child.objects.filter(user=task.created_by)
             for child in children:
-                Notification.objects.create(user=child.user, child=child, task=task, message=message)
+                Notification.objects.create(
+                    user=child.user,
+                    child=child,
+                    task=task,
+                    message=message,
+                    assigned_to_type='child'  # <-- Store type
+                )
                 logger.info(f"Notification created for child: {child.user}")
 
-        # Only partners created by current user
         elif assigned_to_type == 'partner':
-            partners = Partner.objects.filter(created_by=task.created_by)
+            partners = Partner.objects.filter(user=task.created_by)
             for partner in partners:
-                Notification.objects.create(user=partner.user, partner=partner, task=task, message=message)
+                Notification.objects.create(
+                    user=partner.user,
+                    partner=partner,
+                    task=task,
+                    message=message,
+                    assigned_to_type='partner'  # <-- Store type
+                )
                 logger.info(f"Notification created for partner: {partner.user}")
 
-        # Only the admin (creator)
         elif assigned_to_type == 'self':
-            Notification.objects.create(user=task.created_by, task=task, message=message)
+            Notification.objects.create(
+                user=task.created_by,
+                task=task,
+                message=message,
+                assigned_to_type='self'  # <-- Store type
+            )
             logger.info(f"Notification created for admin: {task.created_by}")

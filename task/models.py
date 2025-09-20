@@ -214,7 +214,7 @@ class Receipt(models.Model):
     receipt_type = models.CharField(max_length=10, choices=RECEIPT_TYPES, blank=True, null=True)
     # Detailed receipt information
     date = models.CharField(max_length=10, blank=True, null=True)  # e.g., 17-07-2025
-    time = models.CharField(max_length=5, blank=True, null=True)   # e.g., 02:06
+    time = models.CharField(max_length=50, blank=True, null=True)   # e.g., 02:06
     shop_name = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     payment_method = models.CharField(max_length=100, blank=True, null=True)
