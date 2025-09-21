@@ -87,7 +87,7 @@ def createQRTaskData(request):
 # @api_view(['POST'])
 def qr_task_view(request, pk):
     qr_task = get_object_or_404(QRTaskData, pk=pk)
-    content = {
+    data = {
         "title": qr_task.title,
         "contents": qr_task.contents,
         "task_metadata": {
@@ -102,8 +102,5 @@ def qr_task_view(request, pk):
         },
         "voice_url": request.build_absolute_uri(qr_task.voice.url) if qr_task.voice else None
     }
-
-
-
-    return render(request, "qr_task_view.html", {"content": content})
+    return render(request, "qr_task_view.html", {"data": data})
 

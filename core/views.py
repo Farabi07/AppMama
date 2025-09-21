@@ -47,13 +47,13 @@ def has_cooking_ingredients(text):
     ]
     
     # Check for "have" + ingredients pattern (your exact case)
-    has_have = any(word in text.lower() for word in ["i have", "have", "got", "available"])
+    # has_have = any(word in text.lower() for word in ["i have", "have", "got", "available"])
     has_ingredients = any(word in text.lower() for word in food_keywords)
     has_connectors = any(conn in text.lower() for conn in [" and ", ",", " with ", " plus "])
     
-    print(f"🔍 Recipe detection: has_have={has_have}, has_ingredients={has_ingredients}, has_connectors={has_connectors}")
-    
-    return has_have and has_ingredients and (has_connectors or len(text.split()) <= 15)
+    print(f"🔍 Recipe detection: , has_ingredients={has_ingredients}, has_connectors={has_connectors}")
+
+    return has_ingredients and (has_connectors or len(text.split()) <= 15)
 
 @csrf_exempt
 @permission_classes([IsAuthenticated])

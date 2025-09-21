@@ -15,7 +15,8 @@ import os
 warnings.filterwarnings("ignore")
 
 # 🔑 Initialize OpenAI client
-
+# 🔑 Initialize OpenAI client
+# client = OpenAI(api_key="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") 
 
 # ⭐ NEW FEATURE: API Configuration for Schedule Settings
 SCHEDULE_SETTINGS_URL = 'http://10.10.7.85:8001/task/api/v1/task/all/'
