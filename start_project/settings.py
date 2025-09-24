@@ -19,6 +19,7 @@ from django.conf import settings
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.0/howto/deployment/checklist/
 
@@ -62,6 +63,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.google',
     'allauth.socialaccount.providers.apple',
     'rest_framework_simplejwt.token_blacklist',
+    'storages',
 
     #local
     'authentication.apps.AuthenticationConfig',
@@ -125,26 +127,26 @@ WSGI_APPLICATION = 'start_project.wsgi.application'
 
 AUTH_USER_MODEL = 'authentication.User'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB'),
-        'USER': os.getenv('POSTGRES_USER'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
-        'HOST': os.getenv('POSTGRES_HOST'),
-        'PORT': os.getenv('POSTGRES_PORT'),
-    }
-}
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.getenv('AWS_NAME'),
-#         'USER': os.getenv('AWS_USER'),
-#         'PASSWORD': os.getenv('AWS_PASSWORD'),
-#         'HOST': os.getenv('AWS_HOST'),
-#         'PORT': os.getenv('DB_PORT'),
+#         'NAME': os.getenv('POSTGRES_DB'),
+#         'USER': os.getenv('POSTGRES_USER'),
+#         'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+#         'HOST': os.getenv('POSTGRES_HOST'),
+#         'PORT': os.getenv('POSTGRES_PORT'),
 #     }
 # }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('AWS_NAME'),
+        'USER': os.getenv('AWS_USER'),
+        'PASSWORD': os.getenv('AWS_PASSWORD'),
+        'HOST': os.getenv('AWS_HOST'),
+        'PORT': os.getenv('DB_PORT'),
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
@@ -350,8 +352,8 @@ SOCIALACCOUNT_STORE_TOKENS = True
 SOCIAL_AUTH_GOOGLE_CLIENT_ID = os.getenv('SOCIAL_AUTH_GOOGLE_CLIENT_ID')
 SOCIAL_AUTH_GOOGLE_SECRET = os.getenv('SOCIAL_AUTH_GOOGLE_SECRET')
 GOOGLE_CALLBACK_URL = os.getenv("GOOGLE_CALLBACK_URL")
-# Apple Auth Settings
-# Now, you can access these values securely
+# # Apple Auth Settings
+# # Now, you can access these values securely
 # APPLE_TEAM_ID = os.getenv("APPLE_TEAM_ID")
 # APPLE_CLIENT_ID = os.getenv("APPLE_CLIENT_ID")
 # APPLE_KEY_ID = os.getenv("APPLE_KEY_ID")
@@ -360,72 +362,27 @@ GOOGLE_CALLBACK_URL = os.getenv("GOOGLE_CALLBACK_URL")
 # APPLE_CALLBACK_URL = os.getenv("APPLE_CALLBACK_URL")
 
 
-# Add logging configuration
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'handlers': {
-#         'console': {
-#             'class': 'logging.StreamHandler',
-#         },
-#     },
-#     'root': {
-#         'handlers': ['console'],
-#         'level': 'INFO',
-#     },
+
+# AWS S3 Storage Configuration taskmamabucket
+
+# AWS_ACCESS_KEY_ID='AKIAZJN445GWBHQ4MH4R'
+# AWS_SECRET_ACCESS_KEY='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'
+
+# AWS_REGION='eu-central-1'
+# AWS_STORAGE_BUCKET_NAME='taskmamabucket'
+# # AWS_S3_SIGNATURE_NAME='s3v4'
+# AWS_S3_FILE_OVERWRITE=False
+# AWS_DEFAULT_ACL = 'public-read'
+# AWS_S3_VERIFY=True
+# AWS_QUERYSTRING_AUTH = True
+# DEFAULT_FILE_STORAGE = 'start_project.storage_backends.PublicMediaStorage'
+# AWS_S3_OBJECT_PARAMETERS = {
+#     'CacheControl': 'max-age=86400',
 # }
-# # Complete S3 Configuration - Add this to your settings.py
-
-# import os
-# from pathlib import Path
-
-# BASE_DIR = Path(__file__).resolve().parent.parent
-
-# # AWS S3 Configuration
-# AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-# AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-# # AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
-# AWS_S3_REGION_NAME = os.getenv('AWS_REGION')
-# # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
-
-# # # S3 Configuration Settings
-# # AWS_DEFAULT_ACL = None
-# # AWS_S3_FILE_OVERWRITE = False
-# # AWS_S3_OBJECT_PARAMETERS = {
-# #     'CacheControl': 'max-age=86400',
-# # }
-
-# # # # Check if we should use S3 (production) or local storage (development)
-# # # USE_S3 = AWS_STORAGE_BUCKET_NAME is not None
-
-# # Use S3 for file storage
-
-#     # Specify custom storage backends for media and static files on S3
-# DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'  # Use this for both media and static
-# STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-
-#     # Set S3 URLs for static and media files
-# STATIC_URL = f'https://{os.getenv("AWS_STORAGE_BUCKET_NAME")}.s3.{os.getenv("AWS_REGION")}.amazonaws.com/static/'
-# MEDIA_URL = f'https://{os.getenv("AWS_STORAGE_BUCKET_NAME")}.s3.{os.getenv("AWS_REGION")}.amazonaws.com/media/'
-
-#     # AWS S3 credentials (using environment variables)
-AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-AWS_REGION = os.getenv('AWS_REGION')
-# AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
-
-
-# # Add this to temporarily debug your settings
-# print("AWS_REGION:", os.getenv('AWS_REGION'))
-# print("AWS_STORAGE_BUCKET_NAME:", os.getenv('AWS_STORAGE_BUCKET_NAME'))
-# print("AWS_S3_SIGNATURE_NAME:", os.getenv('AWS_S3_SIGNATURE_NAME'))
-# print("DEFAULT_FILE_STORAGE:", os.getenv('DEFAULT_FILE_STORAGE'))
 
 
 
-import os
-
-BASE_DIR = Path(__file__).resolve().parent.parent  # This is the base directory for your project
+ # This is the base directory for your project
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
