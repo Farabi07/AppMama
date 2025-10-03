@@ -206,9 +206,10 @@ import logging
 
 # Map product_id to subscription duration in days
 PRODUCT_DURATION_MAP = {
-    'monthly_premium': 30,
-    'yearly_premium': 365,
-    # Add more products as needed
+    'family_mode_monthly': 30,
+    'family_mode_yearly': 365,
+    'boss_mode_monthly': 30,
+    'boss_mode_yearly': 365,
 }
 
 # Logging setup for debugging
@@ -219,21 +220,20 @@ logger = logging.getLogger(__name__)
 def save_subscription(request):
     data = request.data
     user = request.user
-    
-    # Log incoming data for debugging purposes
+
     logger.info(f"Received data: {data}")
 
-    # Extract product information
     product_id = data.get('product_id')
     duration_days = PRODUCT_DURATION_MAP.get(product_id)
     if not duration_days:
         return Response({'error': 'Invalid product_id.'}, status=400)
 
-    # Set start and expiration dates
+    # Get price from frontend (optional)
+    price = data.get('price')  # <-- Accept price from frontend
+
     started_at = timezone.now()
     expires_at = started_at + timezone.timedelta(days=duration_days)
-    
-    # Retrieve or create subscription
+
     subscription, _ = Subscription.objects.get_or_create(user=user)
     subscription.is_active = True
     subscription.started_at = started_at
@@ -243,24 +243,21 @@ def save_subscription(request):
     subscription.purchase_token = data.get('purchase_token')
     subscription.transaction_id = data.get('transaction_id')
     subscription.original_transaction_id = data.get('original_transaction_id')
-    
-    # Handle purchase_date if provided
+    if price is not None:
+        subscription.price = price  # <-- Save price if your model has this field
+
     purchase_date_str = data.get('purchase_date')
     if purchase_date_str:
         try:
-            # Handle 'Z' as UTC in the string and parse into a datetime object
             normalized_purchase_date = purchase_date_str.replace('Z', '+00:00')
             subscription.purchase_date = datetime.fromisoformat(normalized_purchase_date)
         except ValueError as e:
-            # Log the error and return a response
             logger.error(f"Error parsing purchase_date: {purchase_date_str}. Error: {e}")
             return Response({'error': 'Invalid purchase_date format.'}, status=400)
-    
-    # Set subscription status to active and save
+
     subscription.status_is = 'active subscription'
     subscription.save()
 
-    # Return success response
     return Response({'success': True, 'message': 'Subscription activated.'})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

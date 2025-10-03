@@ -182,3 +182,12 @@ class CustomAppleLogin(View):
             return JsonResponse({
                 'error': f'Authentication failed: {str(e)}'
             }, status=500)
+
+from django.shortcuts import render
+
+def my_html_view(request):
+    context = {
+        "title": "Welcome!",
+        "message": "This is a rendered HTML page.",
+    }
+    return render(request, "privacy.html", context)

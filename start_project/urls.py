@@ -59,6 +59,7 @@ urlpatterns = [
     path('dj-rest-auth/apple/', CustomAppleLogin.as_view(), name='apple_login'),
 
     path('accounts/', include('allauth.urls')), 
+    path('privacy-policy/', views.my_html_view, name='my_html_view'),  # New HTML view
 
 	re_path(r'^media/(?P<path>.*)$', serve,{'document_root': settings.MEDIA_ROOT}), 
 	re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.STATIC_ROOT}),

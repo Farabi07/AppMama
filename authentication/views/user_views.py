@@ -418,9 +418,6 @@ def userImageUpload(request, pk):
         response = {'detail': f'An error occurred: {str(e)}'}
         return Response(response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-
-
 @extend_schema(request=AdminUserSerializer, responses=AdminUserSerializer)
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])

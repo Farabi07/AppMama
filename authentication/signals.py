@@ -22,17 +22,16 @@ def updated_by_signals(sender, instance, created, **kwargs):
 			sender.objects.filter(id=instance.id).update(updated_by=user)
 
 
-@receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def create_subscription_and_start_trial(sender, instance, created, **kwargs):
-    if created:
-        # Create subscription with trial started now
-        Subscription.objects.create(
-            user=instance,
-            trial_started_at=timezone.now(),
-            trial_used=False,
-            is_active=False
-            
-        )
+@receiver(post_save, sender=User)
+def create_user_subscription(sender, instance, created, **kwargs):
+    """
+    Automatically create a subscription and start trial when a new user is created.
+    """
+    if created:  # Only for newly created users
+        subscription = Subscription.objects.create(user=instance)
+        subscription.start_trial()  # Start the 7-day trial immediately
+
+        
 # Branch signals
 post_save.connect(created_by_signals, sender=Branch)
 post_save.connect(updated_by_signals, sender=Branch)

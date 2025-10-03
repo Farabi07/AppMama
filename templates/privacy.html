@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Task Mama</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #2d3748;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            animation: slideIn 0.8s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+            position: relative;
+            z-index: 2;
+        }
+
+        .last-updated {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            position: relative;
+            z-index: 2;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .toc {
+            background: #f8fafc;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 40px;
+            border-left: 4px solid #4f46e5;
+        }
+
+        .toc h2 {
+            color: #4f46e5;
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+        }
+
+        .toc ul {
+            list-style: none;
+            columns: 2;
+            column-gap: 30px;
+        }
+
+        .toc li {
+            margin-bottom: 8px;
+            break-inside: avoid;
+        }
+
+        .toc a {
+            color: #6366f1;
+            text-decoration: none;
+            transition: color 0.3s ease;
+            display: block;
+            padding: 5px 0;
+        }
+
+        .toc a:hover {
+            color: #4338ca;
+            text-decoration: underline;
+        }
+
+        .section {
+            margin-bottom: 50px;
+            opacity: 0;
+            animation: fadeInUp 0.8s ease-out forwards;
+        }
+
+        .section:nth-child(1) { animation-delay: 0.1s; }
+        .section:nth-child(2) { animation-delay: 0.2s; }
+        .section:nth-child(3) { animation-delay: 0.3s; }
+        .section:nth-child(4) { animation-delay: 0.4s; }
+        .section:nth-child(5) { animation-delay: 0.5s; }
+        .section:nth-child(6) { animation-delay: 0.6s; }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .section h2 {
+            color: #1e293b;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .section h3 {
+            color: #475569;
+            font-size: 1.3rem;
+            margin: 25px 0 15px 0;
+        }
+
+        .section h4 {
+            color: #64748b;
+            font-size: 1.1rem;
+            margin: 20px 0 10px 0;
+            font-weight: 600;
+        }
+
+        .section p, .section li {
+            margin-bottom: 12px;
+            font-size: 1rem;
+        }
+
+        .section ul, .section ol {
+            margin-left: 20px;
+            margin-bottom: 20px;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid #f59e0b;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .important-note {
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            border-left: 4px solid #22c55e;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .contact-info {
+            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .contact-info h3 {
+            color: #4338ca;
+            margin-bottom: 20px;
+        }
+
+        .contact-info p {
+            margin-bottom: 10px;
+        }
+
+        .contact-info a {
+            color: #4338ca;
+            text-decoration: none;
+        }
+
+        .contact-info a:hover {
+            text-decoration: underline;
+        }
+
+        .back-to-top {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.3);
+            transition: all 0.3s ease;
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .back-to-top.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .back-to-top:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+
+            .header {
+                padding: 40px 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .toc ul {
+                columns: 1;
+            }
+
+            .section h2 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Privacy Policy</h1>
+            <div class="last-updated">Last Updated: August 27, 2025</div>
+        </div>
+
+        <div class="content">
+            <div class="toc">
+                <h2>Table of Contents</h2>
+                <ul>
+                    <li><a href="#introduction">1. Introduction</a></li>
+                    <li><a href="#information-we-collect">2. Information We Collect</a></li>
+                    <li><a href="#how-we-use">3. How We Use Your Information</a></li>
+                    <li><a href="#data-storage">4. Data Storage and Security</a></li>
+                    <li><a href="#data-sharing">5. Data Sharing and Disclosure</a></li>
+                    <li><a href="#your-rights">6. Your Rights and Choices</a></li>
+                    <li><a href="#childrens-privacy">7. Children's Privacy</a></li>
+                    <li><a href="#international-transfers">8. International Data Transfers</a></li>
+                    <li><a href="#data-retention">9. Data Retention</a></li>
+                    <li><a href="#policy-changes">10. Changes to This Privacy Policy</a></li>
+                    <li><a href="#california-rights">11. California Privacy Rights (CCPA)</a></li>
+                    <li><a href="#european-rights">12. European Privacy Rights (GDPR)</a></li>
+                    <li><a href="#contact">13. Contact Information</a></li>
+                </ul>
+            </div>
+
+            <section id="introduction" class="section">
+                <h2>1. Introduction</h2>
+                <p>This Privacy Policy outlines how Task Mama ("we," "us," or "our") collects, uses, discloses, and safeguards your personal information when you use our mobile application ("App"). We are committed to ensuring the confidentiality and security of your personal data and maintaining transparency about our data practices.</p>
+            </section>
+
+            <section id="information-we-collect" class="section">
+                <h2>2. Information We Collect</h2>
+                
+                <h3>2.1 Information You Provide</h3>
+                <ul>
+                    <li><strong>Account Information:</strong> Name, email address, and account credentials</li>
+                    <li><strong>Task Data:</strong> Details about your tasks, goals, and reminders</li>
+                    <li><strong>User Content:</strong> Categories, tags, notes, and other data you add to tasks</li>
+                    <li><strong>Payment Information:</strong> Processed by Apple via the App Store (we do not store payment details)</li>
+                </ul>
+
+                <h3>2.2 Information Automatically Collected</h3>
+                <ul>
+                    <li><strong>Usage Data:</strong> How you interact with the App, features used, time spent</li>
+                    <li><strong>Device Information:</strong> Device model, operating system version, unique device identifiers</li>
+                    <li><strong>Technical Data:</strong> App performance, crash reports, and error logs</li>
+                    <li><strong>Location Data:</strong> General location (if granted permission) for task reminders and suggestions</li>
+                </ul>
+
+                <h3>2.3 Information from Third Parties</h3>
+                <ul>
+                    <li><strong>Apple Services:</strong> Account verification and purchase information from Apple</li>
+                    <li><strong>Task Management Services:</strong> Third-party services for task reminders and synchronization</li>
+                </ul>
+            </section>
+
+            <section id="how-we-use" class="section">
+                <h2>3. How We Use Your Information</h2>
+                
+                <h3>3.1 Primary Uses</h3>
+                <ul>
+                    <li><strong>Service Delivery:</strong> To process and store your tasks and provide reminder functionality</li>
+                    <li><strong>Account Management:</strong> To create and maintain your account and authenticate your access</li>
+                    <li><strong>Premium Features:</strong> To provide subscription-based services and features</li>
+                    <li><strong>Customer Support:</strong> To respond to your inquiries and provide technical assistance</li>
+                </ul>
+
+                <h3>3.2 Additional Uses</h3>
+                <ul>
+                    <li><strong>App Improvement:</strong> To analyze usage patterns to enhance app features and performance</li>
+                    <li><strong>Communication:</strong> To send service-related notifications, updates, and marketing communications (if opted in)</li>
+                    <li><strong>Legal Compliance:</strong> To comply with legal obligations and protect our rights</li>
+                </ul>
+            </section>
+
+            <section id="data-storage" class="section">
+                <h2>4. Data Storage and Security</h2>
+                
+                <h3>4.1 Data Storage</h3>
+                <ul>
+                    <li><strong>Cloud Storage:</strong> Task data is securely stored on encrypted servers</li>
+                    <li><strong>Data Retention:</strong> We retain your data as long as your account is active or as required for legal purposes</li>
+                    <li><strong>Backup Systems:</strong> Your data is regularly backed up to prevent loss</li>
+                </ul>
+
+                <h3>4.2 Security Measures</h3>
+                <ul>
+                    <li><strong>Encryption:</strong> All data is encrypted both in transit and at rest</li>
+                    <li><strong>Access Controls:</strong> Strict access controls are enforced to limit who can access your data</li>
+                    <li><strong>Security Monitoring:</strong> We regularly monitor our systems to detect potential vulnerabilities</li>
+                    <li><strong>Secure Infrastructure:</strong> We use industry-standard security practices and technologies</li>
+                </ul>
+            </section>
+
+            <section id="data-sharing" class="section">
+                <h2>5. Data Sharing and Disclosure</h2>
+                
+                <div class="important-note">
+                    <h4>5.1 We DO NOT sell your personal information to third parties.</h4>
+                </div>
+
+                <h4>5.2 We may share information in the following situations:</h4>
+                <ul>
+                    <li><strong>Service Providers:</strong> With trusted vendors who help us operate the App (under strict confidentiality agreements)</li>
+                    <li><strong>Legal Requirements:</strong> When required by law, court order, or government request</li>
+                    <li><strong>Business Transfers:</strong> In the event of a merger, acquisition, or sale of business assets</li>
+                    <li><strong>Safety:</strong> To protect the safety and rights of users, our company, or others</li>
+                </ul>
+
+                <h3>5.3 Third-Party Services</h3>
+                <ul>
+                    <li><strong>Apple App Store:</strong> For payment processing and subscription management</li>
+                    <li><strong>Analytics Services:</strong> We may share anonymized usage data for app improvement</li>
+                    <li><strong>Cloud Providers:</strong> We may share data with trusted cloud providers for secure hosting</li>
+                </ul>
+            </section>
+
+            <section id="your-rights" class="section">
+                <h2>6. Your Rights and Choices</h2>
+                
+                <h3>6.1 Access and Control</h3>
+                <ul>
+                    <li><strong>Account Access:</strong> You can view and edit your account information within the App</li>
+                    <li><strong>Data Export:</strong> You can request a copy of your data</li>
+                    <li><strong>Data Deletion:</strong> You can request deletion of your account and all data associated with it</li>
+                    <li><strong>Subscription Management:</strong> You can manage subscriptions via your Apple ID settings</li>
+                </ul>
+
+                <h3>6.2 Communication Preferences</h3>
+                <ul>
+                    <li><strong>Notifications:</strong> Control notifications within the App and via device settings</li>
+                    <li><strong>Marketing:</strong> Opt-out of promotional communications while still receiving service-related notifications</li>
+                </ul>
+
+                <h3>6.3 Location Data</h3>
+                <ul>
+                    <li><strong>Permission Control:</strong> Grant or revoke location access through device settings</li>
+                    <li><strong>Usage:</strong> Location data is used only for task-related features and reminders if permission is granted</li>
+                </ul>
+            </section>
+
+            <section id="childrens-privacy" class="section">
+                <h2>7. Children's Privacy</h2>
+                <p>Our App is not intended for children under the age of 13. We do not knowingly collect personal information from children under 13. If you believe that we have inadvertently collected such information, please contact us immediately.</p>
+            </section>
+
+            <section id="international-transfers" class="section">
+                <h2>8. International Data Transfers</h2>
+                <p>Your data may be processed and stored in countries outside your own. We ensure that appropriate safeguards are in place to protect your data in compliance with applicable privacy laws.</p>
+            </section>
+
+            <section id="data-retention" class="section">
+                <h2>9. Data Retention</h2>
+                <ul>
+                    <li><strong>Active Accounts:</strong> We retain data while your account is active</li>
+                    <li><strong>Account Deletion:</strong> Data is deleted within 30 days of an account deletion request</li>
+                    <li><strong>Legal Requirements:</strong> We may retain some data longer for legal compliance</li>
+                    <li><strong>Anonymized Data:</strong> Some data may be anonymized and retained for analytical purposes</li>
+                </ul>
+            </section>
+
+            <section id="policy-changes" class="section">
+                <h2>10. Changes to This Privacy Policy</h2>
+                <p>We may update this Privacy Policy from time to time. Significant changes will be communicated through an in-app notification, email notice, or other means. The date of the last update will be reflected at the top of this policy.</p>
+            </section>
+
+            <section id="california-rights" class="section">
+                <h2>11. Your California Privacy Rights (CCPA)</h2>
+                <ul>
+                    <li><strong>Right to Know:</strong> You can request information about the personal data we collect and its use</li>
+                    <li><strong>Right to Delete:</strong> You can request deletion of your personal information</li>
+                    <li><strong>Right to Opt-Out:</strong> You can opt-out of the sale of your personal data (we do not sell your data)</li>
+                    <li><strong>Non-Discrimination:</strong> We will not discriminate against you for exercising your CCPA rights</li>
+                </ul>
+            </section>
+
+            <section id="european-rights" class="section">
+                <h2>12. European Privacy Rights (GDPR)</h2>
+                <ul>
+                    <li><strong>Legal Basis:</strong> We process data based on consent, contract, or legitimate interests</li>
+                    <li><strong>Data Portability:</strong> You have the right to receive your data in a structured, commonly used format</li>
+                    <li><strong>Right to Object:</strong> You can object to the processing of your personal data</li>
+                    <li><strong>Supervisory Authority:</strong> You can contact your local data protection authority with concerns</li>
+                </ul>
+            </section>
+
+            <section id="contact" class="section">
+                <h2>13. Contact Information</h2>
+                <div class="contact-info">
+                    <h3>Get in Touch</h3>
+                    <p>If you have any questions, concerns, or requests regarding this Privacy Policy or your personal data, please contact us:</p>
+                    <p><strong>Email:</strong> <a href="mailto:support@taskmama.app">support@taskmama.app</a></p>
+                    <p><strong>Website:</strong> <a href="https://www.taskmama.app/">https://www.taskmama.app/</a></p>
+                    <p><strong>Address:</strong><br>
+                    Wioletta Szczesny<br>
+                    00 Foalgarth Way<br>
+                    Johns Creek - 30022-7165<br>
+                    United States (US)</p>
+                </div>
+            </section>
+
+            <div class="highlight-box">
+                <h3>Effective Date</h3>
+                <p>This Privacy Policy is effective as of the date listed above and applies to all information collected by the App.</p>
+            </div>
+        </div>
+    </div>
+
+    <button class="back-to-top" onclick="scrollToTop()">↑</button>
+
+    <script>
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Back to top button functionality
+        window.addEventListener('scroll', function() {
+            const backToTopButton = document.querySelector('.back-to-top');
+            if (window.pageYOffset > 300) {
+                backToTopButton.classList.add('visible');
+            } else {
+                backToTopButton.classList.remove('visible');
+            }
+        });
+
+        function scrollToTop() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        }
+
+        // Add intersection observer for section animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animationPlayState = 'running';
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.section').forEach(section => {
+            observer.observe(section);
+        });
+    </script>
+</body>
+</html>
