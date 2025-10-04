@@ -9,7 +9,7 @@ from authentication.models import Subscription, SubscriptionPlan
 from django.conf import settings
 import json
 from django.http import JsonResponse
-
+from django.contrib.auth import get_user_model
 # Use Stripe secret key from settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -284,3 +284,40 @@ def subscription_status(request):
             "status": subscription.status_is,
             "expires_at": subscription.expires_at,
         })
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def all_users_subscription_status(request):
+    User = get_user_model()
+    all_users = User.objects.all()
+    users_list = []
+    subscriber_count = 0
+    non_subscriber_count = 0
+
+    for user in all_users:
+        try:
+            subscription = Subscription.objects.get(user=user)
+            if subscription.is_subscription_active():
+                status = "subscriber"
+                subscriber_count += 1
+            else:
+                status = "non-subscriber"
+                non_subscriber_count += 1
+        except Subscription.DoesNotExist:
+            status = "non-subscriber"
+            non_subscriber_count += 1
+
+        users_list.append({
+            "id": user.id,
+            "email": user.email,
+            "full_name": getattr(user, "full_name", ""),
+            "status": status,
+        })
+
+    result = {
+        "users": users_list,
+        "subscriber_count": subscriber_count,
+        "non_subscriber_count": non_subscriber_count,
+        "total_users": all_users.count()
+    }
+    return Response(result)

@@ -278,6 +278,8 @@ class User(AbstractBaseUser):
                     w_h = (1000, 750)
                 elif height > width:
                     w_h = (750, 1000)
+                else:
+                    w_h = (750, 750)
                 img = image.resize(w_h)
                 img.save(path)  
         else:

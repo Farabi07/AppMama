@@ -21,5 +21,7 @@ urlpatterns = [
 
     path('verify-inapp-purchase/', views.save_subscription, name='verify_inapp_purchase'),
     path('api/v1/subscription/activate/', views.subscription_status, name='subscription_status'),
+
+    path('all-users-subscription-status/', views.all_users_subscription_status, name='all_users_subscription_status'),
 ]
    

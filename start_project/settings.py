@@ -365,20 +365,19 @@ GOOGLE_CALLBACK_URL = os.getenv("GOOGLE_CALLBACK_URL")
 
 # AWS S3 Storage Configuration taskmamabucket
 
-# AWS_ACCESS_KEY_ID='AKIAZJN445GWBHQ4MH4R'
-# AWS_SECRET_ACCESS_KEY='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'
 
-# AWS_REGION='eu-central-1'
-# AWS_STORAGE_BUCKET_NAME='taskmamabucket'
-# # AWS_S3_SIGNATURE_NAME='s3v4'
-# AWS_S3_FILE_OVERWRITE=False
-# AWS_DEFAULT_ACL = 'public-read'
-# AWS_S3_VERIFY=True
-# AWS_QUERYSTRING_AUTH = True
-# DEFAULT_FILE_STORAGE = 'start_project.storage_backends.PublicMediaStorage'
-# AWS_S3_OBJECT_PARAMETERS = {
-#     'CacheControl': 'max-age=86400',
-# }
+
+AWS_REGION='eu-central-1'
+AWS_STORAGE_BUCKET_NAME='taskmamabucket'
+AWS_S3_SIGNATURE_NAME='s3v4'
+AWS_S3_FILE_OVERWRITE=False
+AWS_DEFAULT_ACL = 'public-read'
+AWS_S3_VERIFY=True
+AWS_QUERYSTRING_AUTH = True
+DEFAULT_FILE_STORAGE = 'start_project.storage_backends.PublicMediaStorage'
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
 
 
 
