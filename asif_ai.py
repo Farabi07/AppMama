@@ -1,27 +1,94 @@
 # 🌸 Task Mama - Complete Mother-Focused AI Assistant
 # Features: Natural Conversations, Emotional Support, Task Management, Recipe Suggestions, Text Input, Progress Tracking
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file FIRST
+load_dotenv()
+
 from openai import OpenAI
+import openai
 import requests
 import random
 import time
 import json
 import warnings
+import sys
 from datetime import datetime, timedelta
 import re
 import tempfile
-import os
 
 warnings.filterwarnings("ignore")
 
 # 🔑 Initialize OpenAI client
+# API key loaded from .env file
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_KEY:
+    raise RuntimeError("OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.")
+
+client = OpenAI(api_key=OPENAI_KEY)
+
+# --- Session and OpenAI wrapper utilities ---
+# Use per-session conversation history to avoid cross-user leakage.
+_session_histories = {}
+
+def get_session_history(session_id):
+    """Return a list of messages for the given session_id. Initialize if missing."""
+    if not session_id:
+        # fallback to a single global history for backward compatibility
+        session_id = "__global__"
+    if session_id not in _session_histories:
+        # Initialize with system persona
+        _session_histories[session_id] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are Task Mama, a gentle, caring AI assistant specifically designed for mothers. "
+                    "Speak with a warm, soft, caring voice like a supportive friend. Use nurturing language and emojis."
+                )
+            }
+        ]
+    return _session_histories[session_id]
+
+def reset_session_history(session_id):
+    if not session_id:
+        session_id = "__global__"
+    if session_id in _session_histories:
+        del _session_histories[session_id]
+
+def openai_chat(messages, *, model="gpt-4o-mini", max_tokens=300, temperature=0.1, seed=None):
+    """Central wrapper for OpenAI chat completions.
+
+    - temperature: by default 0.1 (deterministic). Use 0.5 when creativity desired.
+    - seed: if provided, include it as a deterministic hint to the model (best-effort).
+    Returns the assistant message string.
+    """
+    # Build kwargs for API call
+    call_kwargs = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": float(temperature)
+    }
+    # Some SDKs accept `seed` or `user` fields; add as metadata if accepted
+    if seed is not None:
+        # include seed in a system message to help make output deterministic across calls
+        messages = [m for m in messages]
+        messages.insert(0, {"role": "system", "content": f"seed:{seed}"})
+        call_kwargs["messages"] = messages
+
+    resp = client.chat.completions.create(**call_kwargs)
+    return resp.choices[0].message.content
 
 
 # ⭐ NEW FEATURE: API Configuration for Schedule Settings
-SCHEDULE_SETTINGS_URL = 'http://10.10.7.85:8001/task/api/v1/task/all/'
+SCHEDULE_SETTINGS_URL = 'https://api.taskmama.app/task/api/v1/task/all/'
+SCHEDULE_BEARER_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzYwODIzNTY0LCJpYXQiOjE3NjAyMTg3NjQsImp0aSI6IjUyOGU1ZjA3NTVlNDQzMWY4NTgxNWE3YTZmNmY4YTMwIiwidXNlcl9pZCI6M30.uVNzy5TRhWY2gID8XVvLp9_RSaz4QmPoEOgqwsX_qdM'
 
 # ⭐ NEW FEATURE: Peptalk API Configuration
-PEPTALK_SETTINGS_URL = 'http://10.10.7.85:8001/peptalk/api/v1/peptalk/all/'
+PEPTALK_SETTINGS_URL = 'https://api.taskmama.app/peptalk/api/v1/peptalk/all/'
 
 def get_peptalk_voice_url():
     """Fetch peptalk voice URL from the API"""
@@ -29,33 +96,66 @@ def get_peptalk_voice_url():
         response = requests.get(PEPTALK_SETTINGS_URL)
         if response.status_code == 200:
             data = response.json()
-            # The API returns a dict with a 'cities' key containing the list
-            if isinstance(data, dict) and 'cities' in data:
-                cities = data['cities']
-                print(f"✅ Successfully retrieved {len(cities)} peptalk entries from API")
-                
-                # Loop through cities to get the 'voice' URL and return a random one
-                voice_urls = []
-                for city in cities:
-                    voice_url = city.get('voice')
-                    if voice_url:
-                        voice_urls.append(voice_url)
-                
-                if voice_urls:
-                    # Return a random voice URL
-                    selected_url = random.choice(voice_urls)
-                    # Format as requested: \media\voices\filename.mp3
-                    if selected_url.startswith('/'):
-                        formatted_url = selected_url.replace('/', '\\')
-                    else:
-                        formatted_url = '\\' + selected_url.replace('/', '\\')
-                    return formatted_url
+            # New expected shape: { "peptalks": [ { "title": "emotion3", "items": [ {.., "voice": "/media/voices/...mp3"}, ... ] }, ... ] }
+            # Backwards compatible: some responses might use 'cities' or other keys.
+            groups = []
+            if isinstance(data, dict):
+                if 'peptalks' in data and isinstance(data['peptalks'], list):
+                    groups = data['peptalks']
+                elif 'cities' in data and isinstance(data['cities'], list):
+                    # older format
+                    groups = data['cities']
+                elif isinstance(data.get('results'), list):
+                    groups = data.get('results')
                 else:
-                    print("❌ No voice URLs found in peptalk entries")
-                    return None
-            else:
-                print("❌ API response does not contain 'cities' key.")
+                    # try to find any top-level list of groups
+                    for v in data.values():
+                        if isinstance(v, list):
+                            groups = v
+                            break
+
+            if not groups:
+                print("❌ No peptalk groups found in API response.")
                 return None
+
+            # Build mapping: title -> list of voice urls
+            group_map = {}
+            total_items = 0
+            for g in groups:
+                title = g.get('title') or g.get('name') or g.get('label') or 'unknown'
+                items = g.get('items') or g.get('voices') or g.get('children') or []
+                voice_list = []
+                if isinstance(items, list):
+                    for it in items:
+                        # item can be a string or dict containing 'voice' or 'url'
+                        if isinstance(it, dict):
+                            v = it.get('voice') or it.get('url') or it.get('audio') or ''
+                        else:
+                            v = str(it)
+                        if v:
+                            voice_list.append(v)
+                if voice_list:
+                    group_map[str(title).lower()] = voice_list
+                    total_items += len(voice_list)
+
+            if not group_map:
+                print("❌ No voice URLs found in peptalk groups")
+                return None
+
+            # Choose a random group, then random voice inside it (caller may filter by emotion class later)
+            # For backward compatibility with earlier usage, just return a random voice across all groups
+            all_voices = []
+            for vs in group_map.values():
+                all_voices.extend(vs)
+            if not all_voices:
+                print("❌ No voice URLs available after parsing groups")
+                return None
+
+            selected_url = random.choice(all_voices)
+            filename = os.path.basename(selected_url)
+            formatted_url = f"/media/voices/{filename}"
+            print(f"✅ Retrieved peptalks: {len(group_map)} groups, {total_items} items total. Returning a random voice.")
+            return formatted_url
         else:
             print(f"❌ Failed to retrieve peptalk entries. HTTP Status Code: {response.status_code}")
             return None
@@ -63,1811 +163,1008 @@ def get_peptalk_voice_url():
         print(f"❌ Error fetching peptalk settings: {e}")
         return None
 
-def get_schedule_settings():
-    """⭐ NEW FEATURE: Fetch company schedule settings from the API"""
+
+def get_peptalk_voice_url_by_emotion(emotion_title=None):
+    """Fetch a peptalk voice URL for a specific emotion class (e.g. 'emotion1', 'emotion2').
+
+    If emotion_title is None or not found, falls back to a random voice across all groups.
+    """
     try:
-        response = requests.get(SCHEDULE_SETTINGS_URL)
-        if response.status_code == 200:
-            data = response.json()
-            # The API now returns a dict with a 'tasks' key containing the list
-            if isinstance(data, dict) and 'tasks' in data:
-                tasks = data['tasks']
-                print(f"✅ Successfully retrieved {len(tasks)} tasks from company API")
-                return tasks
-            else:
-                print("❌ API response does not contain 'tasks' key.")
-                return None
-        else:
-            print(f"❌ Failed to retrieve tasks. HTTP Status Code: {response.status_code}")
+        response = requests.get(PEPTALK_SETTINGS_URL)
+        if response.status_code != 200:
+            print(f"❌ Failed to retrieve peptalk entries. HTTP Status Code: {response.status_code}")
             return None
+
+        data = response.json()
+        groups = []
+        if isinstance(data, dict):
+            if 'peptalks' in data and isinstance(data['peptalks'], list):
+                groups = data['peptalks']
+            elif 'cities' in data and isinstance(data['cities'], list):
+                groups = data['cities']
+            elif isinstance(data.get('results'), list):
+                groups = data.get('results')
+            else:
+                for v in data.values():
+                    if isinstance(v, list):
+                        groups = v
+                        break
+
+        if not groups:
+            print("❌ No peptalk groups found in API response.")
+            return None
+
+        # Build map: normalized title -> list of voice urls
+        group_map = {}
+        for g in groups:
+            title = g.get('title') or g.get('name') or g.get('label') or 'unknown'
+            items = g.get('items') or g.get('voices') or g.get('children') or []
+            voice_list = []
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict):
+                        v = it.get('voice') or it.get('url') or it.get('audio') or ''
+                    else:
+                        v = str(it)
+                    if v:
+                        voice_list.append(v)
+            if voice_list:
+                group_map[str(title).lower()] = voice_list
+
+        if not group_map:
+            print("❌ No voice URLs found in peptalk groups")
+            return None
+
+        # If emotion_title provided, try to match it to a group
+        if emotion_title:
+            key = emotion_title.lower().strip()
+            # direct match
+            if key in group_map and group_map[key]:
+                selected_url = random.choice(group_map[key])
+                filename = os.path.basename(selected_url)
+                return f"/media/voices/{filename}"
+            # partial match heuristic
+            for k, vs in group_map.items():
+                if key in k or k in key:
+                    if vs:
+                        selected_url = random.choice(vs)
+                        filename = os.path.basename(selected_url)
+                        return f"/media/voices/{filename}"
+
+        # Fallback: choose any random voice across all groups
+        all_voices = []
+        for vs in group_map.values():
+            all_voices.extend(vs)
+        if not all_voices:
+            print("❌ No voice URLs available after parsing groups")
+            return None
+
+        selected_url = random.choice(all_voices)
+        filename = os.path.basename(selected_url)
+        return f"/media/voices/{filename}"
     except Exception as e:
-        print(f"❌ Error fetching schedule settings: {e}")
+        print(f"❌ Error fetching peptalk settings: {e}")
         return None
 
-# 🧠 Global Variables
-user_tasks = []
-daily_schedule = {}
-conversation_history = [
-    {
-        "role": "system",
-        "content": """You are Task Mama, a gentle, caring AI assistant specifically designed for mothers. 
-        
-        Your personality:
-        - Speak with a warm, soft, caring voice like a supportive friend
-        - Use nurturing language with emojis like 💕, 🌸, 🤗, 💖
-        - Always acknowledge the challenges of motherhood
-        - Be understanding, patient, and encouraging
-        - Offer practical advice and emotional support
-        - Answer any questions using your knowledge like a helpful friend
-        - Be conversational and natural in your responses
-        
-        Your capabilities:
-        1. Normal conversations and answering any questions using your knowledge
-        2. Emotional support and understanding mother's feelings
-        3. Task management and daily planning assistance (only when specifically requested)
-        4. Recipe suggestions (only when specifically requested)
-        5. Gentle advice and suggestions on any topic
-        6. Accept text input from users
-        7. Track task progress and provide motivation
-        
-        Always respond as if you're talking to a dear friend who is doing her best as a mother.
-        Answer questions naturally using your knowledge without triggering special functions unless specifically requested."""
-    }
-]
+
+def generate_motivational_message_canonical(task_name, percentage, *, session_id=None, seed=None):
+    """Canonical motivational message generator used across the codebase.
+
+    - Uses the central openai_chat wrapper when available (respects seed).
+    - Default deterministic temperature is applied in the wrapper; this function
+      requests a low temperature for consistent responses.
+    - Falls back to hard-coded friendly messages if AI call fails.
+    """
+    try:
+        remaining_percentage = max(0, 100 - int(percentage or 0))
+        prompt = f"""
+Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+
+The message should:
+1. Acknowledge their progress positively
+2. Mention how much is left ({remaining_percentage}%)
+3. Be encouraging and supportive
+4. Use caring language with emojis like 💕, 🌸, ✨
+5. Sound like a supportive friend
+6. Be 2-3 sentences long
+7. ALWAYS include a caring question about feeling tired and suggest taking a break
+
+IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕"
+"""
+        messages = [{"role": "user", "content": prompt}]
+        # Use deterministic low-temperature by default via the wrapper
+        text = openai_chat(messages, max_tokens=200, temperature=0.1, seed=seed)
+        return text.strip()
+    except Exception as e:
+        # Preserve the existing fallback messages (keeps user-facing behavior unchanged)
+        try:
+            percentage_int = int(percentage)
+        except Exception:
+            percentage_int = 0
+        remaining = max(0, 100 - percentage_int)
+        if percentage_int >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage_int >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage_int}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage_int >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage_int}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage_int >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage_int}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+def generate_motivational_message(task_name, percentage, *, session_id=None, seed=None):
+    """Generate motivational message based on task progress. Uses deterministic low-temp by default.
+
+    Parameters:
+    - task_name: str
+    - percentage: int
+    - session_id: optional session id for history context
+    - seed: optional seed to stabilize outputs
+    """
+    remaining_percentage = max(0, 100 - int(percentage or 0))
+    prompt = f"""
+Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+
+The message should:
+1. Acknowledge their progress positively
+2. Mention how much is left ({remaining_percentage}%)
+3. Be encouraging and supportive
+4. Use caring language with emojis like 💕, 🌸, ✨
+5. Sound like a supportive friend
+6. Be 2-3 sentences long
+7. ALWAYS include a caring question about feeling tired and suggest taking a break
+
+IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕"
+"""
+    try:
+        messages = [{"role": "user", "content": prompt}]
+        # deterministic by default
+        text = openai_chat(messages, max_tokens=200, temperature=0.1, seed=seed)
+        return text.strip()
+    except Exception as e:
+        # fallback
+        remaining = remaining_percentage
+        if percentage >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+# ⭐ NEW FEATURE: Find task ID from database
+def find_task_id_from_database(task_name):
+    """Find the task ID from the database using the task name.
+
+    Tries exact/partial matching first, then a single AI fuzzy attempt.
+    """
+    try:
+        tasks = get_schedule_settings()
+        if not tasks:
+            return None
+        user_task_name = (task_name or "").lower().strip()
+        for task in tasks:
+            db_task_name = (task.get("task_name", "") or "").lower().strip()
+            if not db_task_name:
+                continue
+            if user_task_name == db_task_name or user_task_name in db_task_name or db_task_name in user_task_name:
+                return task.get("id")
+        return find_task_id_with_ai(task_name, tasks)
+    except Exception as e:
+        print(f"Error finding task ID: {e}")
+        return None
+
+def find_task_id_with_ai(user_task_name, tasks, *, seed=None):
+    try:
+        task_list = []
+        for task in tasks:
+            task_list.append({
+                "id": task.get("id"),
+                "name": task.get("task_name", ""),
+                "date": task.get("scheduled_date", ""),
+                "time": task.get("scheduled_time", "")
+            })
+        prompt = (
+            f"Find the most similar task from the database that matches the user's task.\n"
+            f"User's task: \"{user_task_name}\"\n"
+            f"Available tasks: {json.dumps(task_list, ensure_ascii=False, indent=2)}\n"
+            "Return ONLY the ID number of the most similar task, or null."
+        )
+        text = openai_chat([{"role": "user", "content": prompt}], max_tokens=40, temperature=0.1, seed=seed)
+        result = text.strip()
+        try:
+            return int(result) if result.lower() != "null" else None
+        except:
+            return None
+    except Exception as e:
+        print(f"Error in AI task matching: {e}")
+        return None
+
+
+# --- Small helper utilities restored after deduplication ---
+def get_schedule_settings():
+    """Fetch schedule/task settings from configured API. Returns a list of task dicts or empty list on failure."""
+    try:
+        headers = {"Authorization": f"Bearer {SCHEDULE_BEARER_TOKEN}"} if SCHEDULE_BEARER_TOKEN else {}
+        resp = requests.get(SCHEDULE_SETTINGS_URL, headers=headers, timeout=6)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Common shapes: list, {results: [...]}, {tasks: [...]}, {data: [...]}
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                for key in ("results", "tasks", "data", "items"):
+                    if key in data and isinstance(data[key], list):
+                        return data[key]
+                # fallback: return any top-level list value
+                for v in data.values():
+                    if isinstance(v, list):
+                        return v
+        return []
+    except Exception:
+        return []
+
 
 def get_user_input():
-    """
-    Get user input via text.
-    Returns tuple: (input_text, status)
-    Status can be: 'success', 'interrupted', 'empty'
-    """
-    try:
-        user_input = input("💕 You: ").strip()
-        return user_input, 'success' if user_input else 'empty'
-    except KeyboardInterrupt:
-        return "", 'interrupted'
+    """Unified user input helper used by interactive chat flows.
 
-# ⭐ NEW FEATURE: Task Progress Detection
-def detect_task_progress_update(user_input):
-    """Detect if user is reporting task progress completion"""
+    Returns (text, status) where status is one of: 'ok', 'empty', 'interrupted'.
+    """
     try:
-        prompt = f"""
-        Analyze this user input to determine if they are reporting progress on a task.
-        
-        User input: "{user_input}"
-        
-        Look for patterns like:
-        - "I have completed [percentage]% of [task]"
-        - "I finished [fraction] of [task]" 
-        - "I'm [percentage]% done with [task]"
-        - "I completed half/quarter/third of [task]"
-        - "I finished [task] partially"
-        - Any variation indicating task progress
-        
-        Return true if the user is reporting task progress, false otherwise.
-        
-        Respond with only "true" or "false".
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip().lower()
-        return result == "true"
-        
-    except Exception as e:
-        print(f"Error detecting task progress: {e}")
-        # Fallback to keyword detection
-        text = user_input.lower()
-        progress_keywords = [
-            'completed', 'finished', 'done', '%', 'percent', 'percentage',
-            'half', 'quarter', 'third', 'fourth', 'fifth', 'one fourth',
-            'one fifth', 'one third', 'one half', 'partially', 'partly'
-        ]
-        return any(keyword in text for keyword in progress_keywords)
+        # interactive preferred
+        if os.isatty(0):
+            text = input("You: ").strip()
+            if text == "":
+                return "", "empty"
+            return text, "ok"
+        # non-interactive: try to read one line from stdin
+        line = sys.stdin.readline()
+        if not line:
+            return "", "empty"
+        text = line.strip()
+        return text, "ok" if text else ("", "empty")
+    except KeyboardInterrupt:
+        return "", "interrupted"
+    except Exception:
+        return "", "empty"
+
+
+def detect_task_progress_update(user_input):
+    """Heuristic detection for task progress updates (e.g., "I completed 50% of washing dishes")."""
+    if not user_input:
+        return False
+    text = user_input.lower()
+    if re.search(r"\d+%", text):
+        return True
+    # phrases indicating completion with numbers
+    if any(w in text for w in ["completed", "finished", "i did", "i've done", "i have done", "done"]):
+        if re.search(r"\d+", text):
+            return True
+    return False
+
 
 def extract_task_progress(user_input):
-    """Extract task name and progress percentage from user input - IMPROVED VERSION"""
-    try:
-        prompt = f"""
-        Analyze this user input to extract task progress information.
-        
-        User input: "{user_input}"
-        
-        CRITICAL: Extract the EXACT task name mentioned by the user.
-        
-        Examples:
-        - "i have completed playing football 50%" → task_name: "playing football", task_percentage: 50
-        - "i finished half of cleaning kitchen" → task_name: "cleaning kitchen", task_percentage: 50
-        - "i completed 25% of homework" → task_name: "homework", task_percentage: 25
-        
-        Conversion rules for fractions:
-        - "half" or "one half" = 50%
-        - "quarter" or "one fourth" = 25%
-        - "three quarters" or "three fourth" = 75%
-        - "one third" = 33%
-        - "two thirds" = 67%
-        - "one fifth" = 20%
-        - "full" or "complete" = 100%
-        
-        Return ONLY this JSON format:
-        {{
-            "task_name": "exact task name from user input",
-            "task_percentage": 50
-        }}
-        
-        IMPORTANT: 
-        - Use the EXACT task name the user mentioned
-        - Don't add or remove words from the task name
-        - If you can't find a clear task name, use "task"
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=150,
-            temperature=0.1
-        )
-        
-        result_text = response.choices[0].message.content.strip()
-        
-        # Clean up the response
-        if result_text.startswith("```json"):
-            result_text = result_text.replace("```json", "").replace("```", "").strip()
-        elif result_text.startswith("```"):
-            result_text = result_text.replace("```", "").strip()
-        
+    """Extract a best-effort task name and percentage from free text.
+
+    Returns dict: { 'task_name': str, 'task_percentage': int }
+    """
+    text = (user_input or "").strip()
+    pct = None
+    # look for explicit percent like '50%'
+    m = re.search(r"(\d{1,3})\s*%", text)
+    if m:
         try:
-            progress_data = json.loads(result_text)
-            
-            # Validate the extracted data
-            task_name = progress_data.get("task_name", "").strip()
-            task_percentage = progress_data.get("task_percentage", 0)
-            
-            # If task name is generic or empty, try fallback
-            if not task_name or task_name.lower() in ["task", "unknown task", "the task"]:
-                fallback_data = extract_progress_fallback(user_input)
-                if fallback_data.get("task_name") != "unknown task":
-                    task_name = fallback_data.get("task_name")
-            
-            return {
-                "task_name": task_name if task_name else "task",
-                "task_percentage": task_percentage
-            }
-            
-        except json.JSONDecodeError:
-            # Fallback extraction
-            return extract_progress_fallback(user_input)
-            
-    except Exception as e:
-        print(f"Error extracting task progress: {e}")
-        return extract_progress_fallback(user_input)
-
-def extract_progress_fallback(user_input):
-    """Fallback method to extract progress using basic pattern matching - IMPROVED VERSION"""
-    text = user_input.lower()
-    
-    # Extract percentage
-    percentage = 0
-    if 'half' in text or 'one half' in text:
-        percentage = 50
-    elif 'quarter' in text or 'one fourth' in text or '1/4' in text:
-        percentage = 25
-    elif 'third' in text or 'one third' in text or '1/3' in text:
-        percentage = 33
-    elif 'fifth' in text or 'one fifth' in text or '1/5' in text:
-        percentage = 20
-    elif 'full' in text or 'complete' in text or 'finished' in text:
-        percentage = 100
-    else:
-        # Look for explicit percentage
-        percentage_match = re.search(r'(\d+)%', text)
-        if percentage_match:
-            percentage = int(percentage_match.group(1))
-    
-    # IMPROVED: Extract task name with better logic
-    task_name = "unknown task"
-    
-    # Try multiple patterns to extract task name
-    words = user_input.split()
-    
-    # Pattern 1: "i have completed [task] [percentage]%
-    # Pattern 2: "i completed [percentage]% of [task]"
-    # Pattern 3: "i have completed [percentage]% [task]"
-    
-    # Look for task name after common progress indicators
-    progress_indicators = ['completed', 'finished', 'done', 'complete']
-    
-    for i, word in enumerate(words):
-        word_lower = word.lower()
-        
-        # Pattern: "completed playing football 50%"
-        if word_lower in progress_indicators and i + 1 < len(words):
-            # Get words after the progress indicator until we hit percentage or end
-            task_words = []
-            for j in range(i + 1, len(words)):
-                next_word = words[j]
-                # Stop if we hit a percentage or number
-                if re.search(r'\d+%|\d+', next_word) or next_word.lower() in ['percent', 'percentage']:
-                    break
-                # Skip common words
-                if next_word.lower() not in ['the', 'a', 'an', 'my', 'of']:
-                    task_words.append(next_word)
-            
-            if task_words:
-                task_name = ' '.join(task_words)
-                break
-        
-        # Pattern: "50% of playing football"
-        elif 'of' in word_lower and i + 1 < len(words):
-            # Get words after "of"
-            task_words = []
-            for j in range(i + 1, len(words)):
-                next_word = words[j]
-                if next_word.lower() not in ['the', 'a', 'an', 'my']:
-                    task_words.append(next_word)
-            
-            if task_words:
-                task_name = ' '.join(task_words)
-                break
-    
-    # Clean up task name
-    task_name = task_name.strip().rstrip('.,!?')
-    
-    return {
-        "task_name": task_name if task_name != "unknown task" else "task",
-        "task_percentage": percentage
-    }
-
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# ⭐ NEW FEATURE: Find task ID from database
-def find_task_id_from_database(task_name):
-    """Find the task ID from the database using the task name"""
-    try:
-        # Get all tasks from API
-        tasks = get_schedule_settings()
-        if not tasks:
-            return None
-        
-        # Search for matching task name
-        for task in tasks:
-            db_task_name = task.get("task_name", "").lower().strip()
-            user_task_name = task_name.lower().strip()
-            
-            # Check for exact match or partial match
-            if (user_task_name in db_task_name or 
-                db_task_name in user_task_name or
-                user_task_name == db_task_name):
-                return task.get("id")
-        
-        # If no match found, try fuzzy matching using AI
-        return find_task_id_with_ai(task_name, tasks)
-        
-    except Exception as e:
-        print(f"Error finding task ID: {e}")
-        return None
-
-def find_task_id_with_ai(user_task_name, tasks):
-    """Use AI to find the most similar task from database"""
-    try:
-        task_list = []
-        for task in tasks:
-            task_info = {
-                "id": task.get("id"),
-                "name": task.get("task_name", ""),
-                "date": task.get("scheduled_date", ""),
-                "time": task.get("scheduled_time", "")
-            }
-            task_list.append(task_info)
-        
-        prompt = f"""
-        Find the most similar task from the database that matches the user's task.
-        
-        User's task: "{user_task_name}"
-        
-        Available tasks in database:
-        {json.dumps(task_list, indent=2)}
-        
-        Return ONLY the task ID (number) of the most similar task.
-        If no similar task found, return null.
-        
-        Consider variations like:
-        - "playing football" matches "football match" or "football game"
-        - "cleaning kitchen" matches "kitchen cleaning"
-        - "studying" matches "homework" or "study session"
-        
-        Return only the ID number or null.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
-            temperature=0.1
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Try to parse as integer
-        try:
-            return int(result) if result.lower() != "null" else None
-        except:
-            return None
-            
-    except Exception as e:
-        print(f"Error in AI task matching: {e}")
-        return None
-
-# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
-def generate_motivational_message(task_name, percentage):
-    """Generate motivational message based on task progress - ENHANCED with tired check"""
-    try:
-        remaining_percentage = 100 - percentage
-        
-        prompt = f"""
-        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
-        
-        The message should:
-        1. Acknowledge their progress positively
-        2. Mention how much is left ({remaining_percentage}%)
-        3. Be encouraging and supportive
-        4. Use caring language with emojis like 💕, 🌸, ✨
-        5. Sound like a supportive friend
-        6. Be 2-3 sentences long
-        7. ALWAYS include a caring question about feeling tired and suggest taking a break
-        
-        Task: {task_name}
-        Progress: {percentage}%
-        Remaining: {remaining_percentage}%
-        
-        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
-        
-        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        print(f"Error generating motivational message: {e}")
-        # Fallback motivational messages with tired check
-        remaining = 100 - percentage
-        if percentage >= 100:
-            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
-        elif percentage >= 75:
-            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
-        elif percentage >= 50:
-            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
-        elif percentage >= 25:
-            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
-        else:
-            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
-
-# 🎭 Enhanced Emotion Detection - FIXED to be more specific
-def analyze_mama_emotions(user_input):
-    """Analyze mama's emotional state using OpenAI - Only trigger for explicit emotional distress"""
-    try:
-        prompt = (
-            "Analyze the following message for emotional distress indicators. "
-            "Return true for is_sad if the user mentions: sad, depressed, down, low, blue, not feeling good, not feeling well, bad mood, terrible, awful, crying, broken, defeated, hopeless, empty. "
-            "Return true for is_overwhelmed if they mention: overwhelmed, swamped, too much, can't cope, breaking down, falling apart. "
-            "Return true for is_stressed if they mention: stressed, stress, anxious, worried, pressure. "
-            "Return true for is_happy if they mention: happy, great, wonderful, blessed, grateful, amazing, good mood. "
-            "DO NOT trigger emotions for normal task planning or scheduling requests. "
-            "Respond with a JSON object like: "
-            "{\"is_sad\": true/false, \"is_overwhelmed\": true/false, \"is_happy\": true/false, \"is_stressed\": true/false, \"sadness_score\": float, \"emotions\": {}}. "
-            "Message: " + user_input
-        )
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=150,
-            temperature=0.0
-        )
-        result_text = response.choices[0].message.content
-        # Try to parse JSON from response
-        try:
-            emotions = json.loads(result_text)
-            # Always check keyword detection as backup and merge results
-            keyword_emotions = detect_emotions_by_keywords(user_input)
-            
-            # If keyword detection finds emotions but API doesn't, use keyword results
-            if (keyword_emotions['is_sad'] or keyword_emotions['is_overwhelmed'] or keyword_emotions.get('is_stressed', False)):
-                if not (emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False)):
-                    print("DEBUG: Using keyword detection as API missed emotions")
-                    return keyword_emotions
-            
-            return emotions
+            pct = int(m.group(1))
         except Exception:
-            # Fallback to keyword detection if parsing fails
-            return detect_emotions_by_keywords(user_input)
+            pct = None
+
+    # word-based fractions
+    if pct is None:
+        if "half" in text:
+            pct = 50
+        elif "quarter" in text:
+            pct = 25
+        elif "third" in text:
+            pct = 33
+
+    if pct is None:
+        # look for plain numbers like 'I did 30 of the task' or 'did 30 percent'
+        m2 = re.search(r"(\d{1,3})\s*(percent|percent\b|pct|percent\.)?", text)
+        if m2:
+            try:
+                pct = int(m2.group(1))
+            except Exception:
+                pct = None
+
+    if pct is None:
+        pct = 0
+
+    # Extract task name: prefer phrase after 'of' before percentage, or after 'completed'
+    task_name = "task"
+    # Try pattern: '... X% of TASK'
+    if m:
+        before = text[:m.start()]
+        if " of " in before:
+            candidate = before.split(" of ")[-1]
+            task_name = candidate.strip()
+        elif "completed " in before:
+            candidate = before.split("completed ")[-1]
+            task_name = candidate.strip()
+        else:
+            # take last up to 6 words before percent
+            tokens = re.findall(r"\w+", before)
+            task_name = " ".join(tokens[-6:]) if tokens else "task"
+    else:
+        # no percent, try after 'completed'
+        if "completed " in text:
+            candidate = text.split("completed ", 1)[1]
+            task_name = candidate.strip().split(" ")[:6]
+            task_name = " ".join(task_name).rstrip('.,!?')
+        else:
+            # fallback: first 6 words
+            tokens = re.findall(r"\w+", text)
+            task_name = " ".join(tokens[:6]) if tokens else "task"
+
+    # Clean punctuation
+    task_name = re.sub(r"[\n\r]+", " ", task_name).strip()
+    task_name = task_name.strip().rstrip('.,!?')
+
+    try:
+        pct = int(max(0, min(100, int(pct))))
+    except Exception:
+        pct = 0
+
+    return {"task_name": task_name if task_name else "task", "task_percentage": pct}
+
+
+def classify_user_emotion_to_peptalk_class(user_input, detected):
+    """Map detected emotion dictionary to a peptalk class label (emotion1..emotion4)."""
+    if isinstance(detected, dict):
+        primary = detected.get('primary_emotion') or detected.get('primary')
+        if primary in ('emotion1', 'emotion2', 'emotion3', 'emotion4'):
+            return primary
+        # fallback based on flags
+        if detected.get('is_emotion3') or detected.get('is_happy'):
+            return 'emotion3'
+        if detected.get('is_emotion4') or detected.get('is_overwhelmed') or detected.get('is_stressed'):
+            return 'emotion4'
+        if detected.get('is_emotion2') or detected.get('is_sad'):
+            return 'emotion2'
+    # final fallback
+    return 'emotion3'
+
+
+# Note: removed repeated duplicate definitions of generate_motivational_message,
+# find_task_id_from_database, and find_task_id_with_ai. The canonical
+# implementations defined earlier (including generate_motivational_message_canonical)
+# are preserved and the public name `generate_motivational_message` will be bound
+# to the canonical implementation at the end of the file as intended.
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+# ⭐ NEW FEATURE: Find task ID from database
+# Subsequent duplicates removed; earlier canonical implementations are retained.
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+def generate_motivational_message(task_name, percentage):
+    """Generate motivational message based on task progress - ENHANCED with tired check"""
+    try:
+        remaining_percentage = 100 - percentage
+        
+        prompt = f"""
+        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+        
+        The message should:
+        1. Acknowledge their progress positively
+        2. Mention how much is left ({remaining_percentage}%)
+        3. Be encouraging and supportive
+        4. Use caring language with emojis like 💕, 🌸, ✨
+        5. Sound like a supportive friend
+        6. Be 2-3 sentences long
+        7. ALWAYS include a caring question about feeling tired and suggest taking a break
+        
+        Task: {task_name}
+        Progress: {percentage}%
+        Remaining: {remaining_percentage}%
+        
+        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
+        
+        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.1
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error generating motivational message: {e}")
+        # Fallback motivational messages with tired check
+        remaining = 100 - percentage
+        if percentage >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+# ⭐ NEW FEATURE: Find task ID from database
+def find_task_id_from_database(task_name):
+    """Find the task ID from the database using the task name"""
+    try:
+        # Get all tasks from API
+        tasks = get_schedule_settings()
+        if not tasks:
+            return None
+        
+        # Search for matching task name
+        for task in tasks:
+            db_task_name = task.get("task_name", "").lower().strip()
+            user_task_name = task_name.lower().strip()
+            
+            # Check for exact match or partial match
+            if (user_task_name in db_task_name or 
+                db_task_name in user_task_name or
+                user_task_name == db_task_name):
+                return task.get("id")
+        
+        # If no match found, try fuzzy matching using AI
+        return find_task_id_with_ai(task_name, tasks)
+        
+    except Exception as e:
+        print(f"Error finding task ID: {e}")
+        return None
+
+def find_task_id_with_ai(user_task_name, tasks):
+    """Use AI to find the most similar task from database"""
+    try:
+        task_list = []
+        for task in tasks:
+            task_info = {
+                "id": task.get("id"),
+                "name": task.get("task_name", ""),
+                "date": task.get("scheduled_date", ""),
+                "time": task.get("scheduled_time", "")
+            }
+            task_list.append(task_info)
+        
+        prompt = f"""
+        Find the most similar task from the database that matches the user's task.
+        
+        Return only the ID number of the most similar task, or null.
+        """
+        text = openai_chat([{"role": "user", "content": prompt}], max_tokens=40, temperature=0.1)
+        result = text.strip()
+        try:
+            return int(result) if result.lower() != "null" else None
+        except:
+            return None
+    except Exception as e:
+        print(f"Error in AI task matching: {e}")
+        return None
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+# Subsequent duplicates removed; canonical implementations above are retained.
+
+# ⭐ NEW FEATURE: Find task ID from database
+def find_task_id_from_database(task_name):
+    """Find the task ID from the database using the task name"""
+    try:
+        # Get all tasks from API
+        tasks = get_schedule_settings()
+        if not tasks:
+            return None
+        
+        # Search for matching task name
+        for task in tasks:
+            db_task_name = task.get("task_name", "").lower().strip()
+            user_task_name = task_name.lower().strip()
+            
+            # Check for exact match or partial match
+            if (user_task_name in db_task_name or 
+                db_task_name in user_task_name or
+                user_task_name == db_task_name):
+                return task.get("id")
+        
+        # If no match found, try fuzzy matching using AI
+        return find_task_id_with_ai(task_name, tasks)
+        
+    except Exception as e:
+        print(f"Error finding task ID: {e}")
+        return None
+
+def find_task_id_with_ai(user_task_name, tasks):
+    """Use AI to find the most similar task from database"""
+    try:
+        task_list = []
+        for task in tasks:
+            task_info = {
+                "id": task.get("id"),
+                "name": task.get("task_name", ""),
+                "date": task.get("scheduled_date", ""),
+                "time": task.get("scheduled_time", "")
+            }
+            task_list.append(task_info)
+        
+        prompt = f"""
+        Find the most similar task from the database that matches the user's task.
+        
+        User's task: "{user_task_name}"
+        
+        Available tasks in database:
+        {json.dumps(task_list, indent=2)}
+        
+        Return ONLY the task ID (number) of the most similar task.
+        If no similar task found, return null.
+        
+        Consider variations like:
+        - "playing football" matches "football match" or "football game"
+        - "cleaning kitchen" matches "kitchen cleaning"
+        - "studying" matches "homework" or "study session"
+        
+        Return only the ID number or null.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.1
+        )
+        
+        result = response.choices[0].message.content.strip()
+        
+        # Try to parse as integer
+        try:
+            return int(result) if result.lower() != "null" else None
+        except:
+            return None
+            
+    except Exception as e:
+        print(f"Error in AI task matching: {e}")
+        return None
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+def generate_motivational_message(task_name, percentage):
+    """Generate motivational message based on task progress - ENHANCED with tired check"""
+    try:
+        remaining_percentage = 100 - percentage
+        
+        prompt = f"""
+        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+        
+        The message should:
+        1. Acknowledge their progress positively
+        2. Mention how much is left ({remaining_percentage}%)
+        3. Be encouraging and supportive
+        4. Use caring language with emojis like 💕, 🌸, ✨
+        5. Sound like a supportive friend
+        6. Be 2-3 sentences long
+        7. ALWAYS include a caring question about feeling tired and suggest taking a break
+        
+        Task: {task_name}
+        Progress: {percentage}%
+        Remaining: {remaining_percentage}%
+        
+        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
+        
+        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.1
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error generating motivational message: {e}")
+        # Fallback motivational messages with tired check
+        remaining = 100 - percentage
+        if percentage >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+# ⭐ NEW FEATURE: Find task ID from database
+def find_task_id_from_database(task_name):
+    """Find the task ID from the database using the task name"""
+    try:
+        # Get all tasks from API
+        tasks = get_schedule_settings()
+        if not tasks:
+            return None
+        
+        # Search for matching task name
+        for task in tasks:
+            db_task_name = task.get("task_name", "").lower().strip()
+            user_task_name = task_name.lower().strip()
+            
+            # Check for exact match or partial match
+            if (user_task_name in db_task_name or 
+                db_task_name in user_task_name or
+                user_task_name == db_task_name):
+                return task.get("id")
+        
+        # If no match found, try fuzzy matching using AI
+        return find_task_id_with_ai(task_name, tasks)
+        
+    except Exception as e:
+        print(f"Error finding task ID: {e}")
+        return None
+
+def find_task_id_with_ai(user_task_name, tasks):
+    """Use AI to find the most similar task from database"""
+    try:
+        task_list = []
+        for task in tasks:
+            task_info = {
+                "id": task.get("id"),
+                "name": task.get("task_name", ""),
+                "date": task.get("scheduled_date", ""),
+                "time": task.get("scheduled_time", "")
+            }
+            task_list.append(task_info)
+        
+        prompt = f"""
+        Find the most similar task from the database that matches the user's task.
+        
+        User's task: "{user_task_name}"
+        
+        Available tasks in database:
+        {json.dumps(task_list, indent=2)}
+        
+        Return ONLY the task ID (number) of the most similar task.
+        If no similar task found, return null.
+        
+        Consider variations like:
+        - "playing football" matches "football match" or "football game"
+        - "cleaning kitchen" matches "kitchen cleaning"
+        - "studying" matches "homework" or "study session"
+        
+        Return only the ID number or null.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.1
+        )
+        
+        result = response.choices[0].message.content.strip()
+        
+        # Try to parse as integer
+        try:
+            return int(result) if result.lower() != "null" else None
+        except:
+            return None
+            
+    except Exception as e:
+        print(f"Error in AI task matching: {e}")
+        return None
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+def generate_motivational_message(task_name, percentage):
+    """Generate motivational message based on task progress - ENHANCED with tired check"""
+    try:
+        remaining_percentage = 100 - percentage
+        
+        prompt = f"""
+        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+        
+        The message should:
+        1. Acknowledge their progress positively
+        2. Mention how much is left ({remaining_percentage}%)
+        3. Be encouraging and supportive
+        4. Use caring language with emojis like 💕, 🌸, ✨
+        5. Sound like a supportive friend
+        6. Be 2-3 sentences long
+        7. ALWAYS include a caring question about feeling tired and suggest taking a break
+        
+        Task: {task_name}
+        Progress: {percentage}%
+        Remaining: {remaining_percentage}%
+        
+        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
+        
+        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.1
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error generating motivational message: {e}")
+        # Fallback motivational messages with tired check
+        remaining = 100 - percentage
+        if percentage >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+# ⭐ NEW FEATURE: Find task ID from database
+def find_task_id_from_database(task_name):
+    """Find the task ID from the database using the task name"""
+    try:
+        # Get all tasks from API
+        tasks = get_schedule_settings()
+        if not tasks:
+            return None
+        
+        # Search for matching task name
+        for task in tasks:
+            db_task_name = task.get("task_name", "").lower().strip()
+            user_task_name = task_name.lower().strip()
+            
+            # Check for exact match or partial match
+            if (user_task_name in db_task_name or 
+                db_task_name in user_task_name or
+                user_task_name == db_task_name):
+                return task.get("id")
+        
+        # If no match found, try fuzzy matching using AI
+        return find_task_id_with_ai(task_name, tasks)
+        
+    except Exception as e:
+        print(f"Error finding task ID: {e}")
+        return None
+
+def find_task_id_with_ai(user_task_name, tasks):
+    """Use AI to find the most similar task from database"""
+    try:
+        task_list = []
+        for task in tasks:
+            task_info = {
+                "id": task.get("id"),
+                "name": task.get("task_name", ""),
+                "date": task.get("scheduled_date", ""),
+                "time": task.get("scheduled_time", "")
+            }
+            task_list.append(task_info)
+        
+        prompt = f"""
+        Find the most similar task from the database that matches the user's task.
+        
+        User's task: "{user_task_name}"
+        
+        Available tasks in database:
+        {json.dumps(task_list, indent=2)}
+        
+        Return ONLY the task ID (number) of the most similar task.
+        If no similar task found, return null.
+        
+        Consider variations like:
+        - "playing football" matches "football match" or "football game"
+        - "cleaning kitchen" matches "kitchen cleaning"
+        - "studying" matches "homework" or "study session"
+        
+        Return only the ID number or null.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.1
+        )
+        
+        result = response.choices[0].message.content.strip()
+        
+        # Try to parse as integer
+        try:
+            return int(result) if result.lower() != "null" else None
+        except:
+            return None
+            
+    except Exception as e:
+        print(f"Error in AI task matching: {e}")
+        return None
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+# Duplicates removed — canonical implementations above are retained.
+
+# ⭐ MODIFIED: Enhanced motivational message with "feeling tired" check
+def generate_motivational_message(task_name, percentage):
+    """Generate motivational message based on task progress - ENHANCED with tired check"""
+    try:
+        remaining_percentage = 100 - percentage
+        
+        prompt = f"""
+        Create a warm, motivational message for a mother who has completed {percentage}% of "{task_name}".
+        
+        The message should:
+        1. Acknowledge their progress positively
+        2. Mention how much is left ({remaining_percentage}%)
+        3. Be encouraging and supportive
+        4. Use caring language with emojis like 💕, 🌸, ✨
+        5. Sound like a supportive friend
+        6. Be 2-3 sentences long
+        7. ALWAYS include a caring question about feeling tired and suggest taking a break
+        
+        Task: {task_name}
+        Progress: {percentage}%
+        Remaining: {remaining_percentage}%
+        
+        IMPORTANT: Always end with something like "Are you feeling tired? Take a break if you need one! 💕" or similar caring message about rest.
+        
+        Create a motivational message that celebrates their achievement and encourages them to continue while caring about their wellbeing.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.1
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error generating motivational message: {e}")
+        # Fallback motivational messages with tired check
+        remaining = 100 - percentage
+        if percentage >= 100:
+            return f"🌸 Amazing work, mama! You've completed {task_name} 100%! You're absolutely incredible! 💕✨ Are you feeling tired? You deserve a good rest now! 🤗"
+        elif percentage >= 75:
+            return f"🌸 You're doing so well, beautiful mama! You've finished {percentage}% of {task_name} - only {remaining}% left to go! You've got this! 💕 Are you feeling tired? Take a break if you need one! 🌸"
+        elif percentage >= 50:
+            return f"🌸 Look at you go, mama! You're {percentage}% done with {task_name} - you're more than halfway there! Just {remaining}% remaining! 🌸💕 Are you feeling tired? Take a break if you need one! 🤗"
+        elif percentage >= 25:
+            return f"🌸 Great progress, sweetie! You've completed {percentage}% of {task_name}. Keep going - you have {remaining}% left and I believe in you! 💖 Are you feeling tired? Take a break if you need one! 💕"
+        else:
+            return f"🌸 Every step counts, beautiful mama! You've started {task_name} and that's wonderful! You have {remaining}% left, but you're already on your way! 💕 Are you feeling tired? Take a break if you need one! 🤗"
+
+# 🎭 Enhanced Emotion Detection - UPDATED to detect all 4 emotion categories
+def analyze_mama_emotions(user_input, *, seed=None):
+    """Analyze mama's emotions. Uses a deterministic low-temp call; falls back to keyword detection."""
+    prompt = (
+        "Analyze the following message for emotional indicators and return a JSON object with keys: "
+        "is_emotion1, is_emotion2, is_emotion3, is_emotion4, primary_emotion, confidence.\nMessage: " + user_input
+    )
+    try:
+        text = openai_chat([{"role": "user", "content": prompt}], max_tokens=150, temperature=0.0, seed=seed)
+        try:
+            emotions = json.loads(text)
+        except Exception:
+            emotions = detect_emotions_by_keywords_updated(user_input)
+        # Ensure legacy keys exist
+        emotions.setdefault('is_sad', emotions.get('is_emotion2', False))
+        emotions.setdefault('is_overwhelmed', emotions.get('is_emotion4', False))
+        emotions.setdefault('is_happy', emotions.get('is_emotion3', False))
+        emotions.setdefault('is_stressed', emotions.get('is_emotion4', False))
+        return emotions
     except Exception as e:
         print(f"Emotion analysis error: {e}")
-        return detect_emotions_by_keywords(user_input)
+        return detect_emotions_by_keywords_updated(user_input)
 
-def detect_emotions_by_keywords(user_input):
-    """Fallback emotion detection using keywords - ONLY for explicit emotional distress"""
+def detect_emotions_by_keywords_updated(user_input):
+    """Updated keyword-based emotion detection for all 4 emotion categories - ENHANCED for robustness"""
     text = user_input.lower()
     
-    # UPDATED: More specific sad keywords - only explicit emotional statements
-    sad_keywords = ['i am sad', 'feeling sad', 'i feel sad', 'i am depressed', 'feeling depressed', 
-                   'i am not feeling well', 'not feeling good', 'feeling down', 'feeling low', 'feeling blue', 'feeling empty',
-                   'i am stressed', 'feeling stressed', 'i feel stressed', 'bad mood', 'in a bad mood',
-                   'feeling overwhelmed', 'i am overwhelmed', 'i feel overwhelmed', 'having a hard time',
-                   'struggling emotionally', 'emotionally struggling', 'feeling terrible emotionally', 
-                   'feeling awful emotionally', 'emotionally drained', 'feeling hopeless',
-                   'feeling defeated', 'feeling broken', 'crying', 'want to cry']
+    # Emotion 1: guilty, exhausted, feeling behind, self critical, pressured - EXPANDED
+    emo1_keywords = [
+        'guilty', 'guilt', 'feel guilty', 'feeling guilty', 'i feel guilty',
+        'exhausted', 'feel exhausted', 'feeling exhausted', 'i feel exhausted', 'so exhausted',
+        'feeling behind', 'behind schedule', 'running behind', 'fall behind', 'falling behind',
+        'not doing enough', 'not good enough', 'not enough', 'dont do enough', 'don\'t do enough',
+        'self critical', 'self-critical', 'criticizing myself', 'critical of myself',
+        'pressured', 'under pressure', 'feel pressured', 'feeling pressured', 'too much pressure',
+        'failing', 'feel like failing', 'feeling like a failure', 'failure as', 'fail at',
+        'not measuring up', 'falling short', 'inadequate', 'insufficient'
+    ]
+    is_emotion1 = any(keyword in text for keyword in emo1_keywords)
     
-    # REMOVED: Generic overwhelm keywords that could be confused with normal planning
-    overwhelm_keywords = ['feeling swamped', 'completely overwhelmed', 'emotionally overwhelmed',
-                         'can\'t cope', 'breaking down', 'falling apart', 'too much stress']
+    # Emotion 2: sad, insecure, self-doubting, lost, unappreciated, unseen, unworthy - EXPANDED  
+    emo2_keywords = [
+        'sad', 'sadness', 'feel sad', 'feeling sad', 'i feel sad', 'so sad', 'really sad',
+        'insecure', 'insecurity', 'feel insecure', 'feeling insecure', 'i feel insecure',
+        'self-doubt', 'self doubt', 'self-doubting', 'self doubting', 'doubt myself', 'doubting myself',
+        'lost', 'feel lost', 'feeling lost', 'i feel lost', 'so lost', 'completely lost',
+        'unappreciated', 'not appreciated', 'feel unappreciated', 'feeling unappreciated',
+        'unseen', 'invisible', 'feel invisible', 'feeling invisible', 'no one sees me',
+        'unworthy', 'not worthy', 'feel unworthy', 'feeling unworthy', 'i feel unworthy',
+        'worthless', 'feel worthless', 'feeling worthless', 'i feel worthless',
+        'nobody cares', 'no one cares', 'no one understands', 'alone', 'lonely',
+        'rejected', 'unwanted', 'unloved', 'not loved', 'not enough'
+    ]
+    is_emotion2 = any(keyword in text for keyword in emo2_keywords)
     
-    happy_keywords = ['i am happy', 'feeling happy', 'i feel happy', 'feeling great', 'doing great',
-                     'i am blessed', 'feeling blessed', 'so grateful', 'feeling wonderful',
-                     'having a good day', 'feeling amazing', 'in a good mood']
+    # Emotion 3: happy - GREATLY EXPANDED for better detection
+    emo3_keywords = [
+        'happy', 'happiness', 'feel happy', 'feeling happy', 'i feel happy', 'so happy', 'really happy', 'very happy',
+        'joyful', 'joy', 'feel joyful', 'feeling joyful', 'full of joy', 'brings me joy',
+        'grateful', 'gratitude', 'feel grateful', 'feeling grateful', 'i feel grateful', 'so grateful', 'very grateful',
+        'blessed', 'feel blessed', 'feeling blessed', 'i feel blessed', 'so blessed',
+        'wonderful', 'feel wonderful', 'feeling wonderful', 'i feel wonderful', 'so wonderful',
+        'amazing', 'feel amazing', 'feeling amazing', 'i feel amazing', 'so amazing',
+        'great', 'feel great', 'feeling great', 'i feel great', 'so great', 'really great',
+        'fantastic', 'feel fantastic', 'feeling fantastic', 'i feel fantastic',
+        'good mood', 'in a good mood', 'good spirits', 'high spirits',
+        'feeling good', 'feel good', 'feeling really good', 'feeling so good',
+        'thankful', 'feel thankful', 'feeling thankful', 'i feel thankful', 'so thankful',
+        'excited', 'feel excited', 'feeling excited', 'i feel excited', 'so excited',
+        'positive', 'feel positive', 'feeling positive', 'optimistic', 'upbeat',
+        'content', 'feel content', 'feeling content', 'satisfied', 'pleased',
+        'delighted', 'cheerful', 'uplifted', 'elated', 'thrilled', 'greatly happy', 'gretly happy'
+    ]
+    is_emotion3 = any(keyword in text for keyword in emo3_keywords)
     
-    is_sad = any(keyword in text for keyword in sad_keywords)
-    is_overwhelmed = any(keyword in text for keyword in overwhelm_keywords)
-    is_happy = any(keyword in text for keyword in happy_keywords)
+    # Emotion 4: tired, unmotivated, low energy, stressed, overwhelmed, frustrated, angry, drained - EXPANDED
+    emo4_keywords = [
+        'tired', 'feel tired', 'feeling tired', 'i feel tired', 'so tired', 'really tired', 'very tired',
+        'exhausted', 'feel exhausted', 'feeling exhausted', 'i feel exhausted', 'so exhausted',
+        'unmotivated', 'no motivation', 'lack motivation', 'feel unmotivated', 'feeling unmotivated',
+        'low energy', 'no energy', 'drained energy', 'energy drained', 'lack energy',
+        'stressed', 'stress', 'feel stressed', 'feeling stressed', 'i feel stressed', 'so stressed', 'under stress',
+        'overwhelmed', 'feel overwhelmed', 'feeling overwhelmed', 'i feel overwhelmed', 'so overwhelmed',
+        'frustrated', 'frustration', 'feel frustrated', 'feeling frustrated', 'i feel frustrated', 'so frustrated',
+        'angry', 'anger', 'feel angry', 'feeling angry', 'i feel angry', 'so angry', 'mad', 'pissed off',
+        'drained', 'feel drained', 'feeling drained', 'i feel drained', 'completely drained',
+        'burned out', 'burnout', 'burn out', 'feel burned out', 'feeling burned out',
+        'scattered', 'feel scattered', 'feeling scattered', 'all over the place',
+        'unfocused', 'can\'t focus', 'cannot focus', 'unable to focus', 'distracted',
+        'anxious', 'anxiety', 'feel anxious', 'feeling anxious', 'nervous', 'worried',
+        'restless', 'agitated', 'irritated', 'annoyed', 'bothered'
+    ]
+    is_emotion4 = any(keyword in text for keyword in emo4_keywords)
     
-    # Check for stressed keywords separately
-    is_stressed = any(stress_word in text for stress_word in ['stressed', 'stress', 'feeling stressed', 'i am stressed', 'i feel stressed'])
+    # Determine primary emotion with priority (happy emotions get priority if multiple detected)
+    primary_emotion = 'emotion3'  # Default to positive
+    if is_emotion3:
+        primary_emotion = 'emotion3'  # Happy gets highest priority
+    elif is_emotion1:
+        primary_emotion = 'emotion1'
+    elif is_emotion2:
+        primary_emotion = 'emotion2'
+    elif is_emotion4:
+        primary_emotion = 'emotion4'
     
     return {
-        'is_sad': is_sad,
-        'is_overwhelmed': is_overwhelmed,
-        'is_happy': is_happy,
-        'is_stressed': is_stressed,
-        'sadness_score': 0.7 if is_sad else 0.3 if is_overwhelmed else 0.3 if is_stressed else 0.1,
+        'is_emotion1': is_emotion1,
+        'is_emotion2': is_emotion2,
+        'is_emotion3': is_emotion3,
+        'is_emotion4': is_emotion4,
+        'primary_emotion': primary_emotion,
+        'confidence': 0.8 if any([is_emotion1, is_emotion2, is_emotion3, is_emotion4]) else 0.1,
+        # Keep legacy keys for backward compatibility
+        'is_sad': is_emotion2,
+        'is_overwhelmed': is_emotion4,
+        'is_happy': is_emotion3,
+        'is_stressed': is_emotion4,
+        'sadness_score': 0.7 if is_emotion2 else 0.1,
         'emotions': {}
     }
 
@@ -1896,6 +1193,7 @@ def detect_recipe_request(user_input):
     """Detect if mama specifically wants recipe suggestions - IMPROVED VERSION"""
     text = user_input.lower()
     
+    # Keep original static phrase detection
     recipe_phrases = [
         # General recipe requests
         'give me recipe', 'suggest me recipe', 'suggest me some recipe', 'suggest recipe',
@@ -1921,8 +1219,40 @@ def detect_recipe_request(user_input):
         'give me cooking suggestions for brunch', 'give me cooking suggestions for dinner',
         'give me cooking suggestions for supper'
     ]
-    
-    return any(phrase in text for phrase in recipe_phrases)
+
+    # Dynamic fuzzy matching for recipe requests (added feature)
+    keywords = [
+        'recipe', 'cook', 'meal', 'food', 'dish', 'suggest meal', 'idea meal', 'meal plan', 'make meal/recipe', 'prepare meal/recipe', 'cooking', 'bake', 'dinner meal/recipe', 'lunch meal/recipe', 'breakfast meal/recipe', 'supper meal/recipe', 'brunch meal/recipe'
+    ]
+    text_words = set(text.split())
+    found = False
+    for word in keywords:
+        if word in text:
+            if any(context in text for context in ['give', 'suggest', 'help', 'what', 'how', 'need', 'want', 'show', 'find', 'get']):
+                found = True
+                break
+    patterns = [
+        r'(give|suggest|show|find|get|help|need|want|how).*\b(recipe|cook|meal|food|dish|prepare|cooking|bake|dinner|lunch|breakfast|supper|brunch)\b',
+        r'\b(recipe|cook|meal|food|dish|prepare|cooking|bake|dinner|lunch|breakfast|supper|brunch)\b.*(please|suggest|help|need|want|show|find|get|give)'
+    ]
+    import re
+    for pattern in patterns:
+        if re.search(pattern, text):
+            found = True
+            break
+    # Also dynamically detect meal planning requests (added feature)
+    meal_keywords = ['plan', 'make', 'prepare', 'suggest', 'idea', 'cook']
+    meal_times = ['dinner', 'lunch', 'breakfast', 'supper', 'brunch', 'meal']
+    meal_found = False
+    for mk in meal_keywords:
+        for mt in meal_times:
+            if mk in text and mt in text:
+                meal_found = True
+                break
+        if meal_found:
+            break
+    # Return True if static, dynamic, or meal planning detection matches
+    return any(phrase in text for phrase in recipe_phrases) or found or meal_found
 
 # ⭐ NEW FEATURE: Task Query Detection
 def detect_task_query_request(user_input):
@@ -1952,7 +1282,7 @@ def detect_task_query_request(user_input):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0.1
@@ -2025,7 +1355,7 @@ def query_existing_tasks(user_input):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
             temperature=0.0
@@ -2131,7 +1461,7 @@ def time_range_matches_dynamic(task_time, time_range):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0.1
@@ -2177,7 +1507,7 @@ def make_task_name_fluent(task_name, assigned_to):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=50,
             temperature=0.1
@@ -2220,7 +1550,7 @@ def format_task_query_response(tasks, target_date, specific_time=None, time_rang
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.3
@@ -2322,7 +1652,7 @@ def extract_tasks_from_text(user_input):
     )
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1024,
             temperature=0.1
@@ -2389,14 +1719,32 @@ Consider these factors naturally (don't just look for keywords):
 4. IMPACT: What happens if this task is delayed or not completed?
 5. RESPONSIBILITY LEVEL: Is this someone's primary responsibility (like parent duties)?
 
+SMART PRIORITY RULES - Use real-world understanding:
+- Meeting friends/social activities = LOW Priority (unless user says it's rare/urgent opportunity)
+- Cleaning house = LOW Priority (unless guests are coming = HIGH Priority)
+- Watching movies/entertainment = LOW Priority (especially if user says "can do tomorrow")
+- Shopping = MEDIUM Priority (unless user says "no grocery left" = HIGH Priority)
+- Medical/health appointments = HIGH Priority
+- Work meetings/deadlines = HIGH Priority
+- Child-related urgent needs = HIGH Priority
+
+EXAMPLES:
+- "Meet my friend today" → LOW Priority (casual social meeting)
+- "Meet my friend, I won't get another chance" → HIGH Priority (rare opportunity)
+- "Clean house" → LOW Priority (routine task)
+- "Clean house, guests coming" → HIGH Priority (time-sensitive)
+- "Watch movie but can watch tomorrow" → LOW Priority (flexible)
+- "Go shopping" → MEDIUM Priority (routine need)
+- "Go shopping, no grocery left" → HIGH Priority (urgent need)
+
 Return ONLY this JSON format:
 {{
-    "priority_score": 8.5,
-    "priority_level": "High Priority",
-    "category": "Child Care & Safety",
+    "priority_score": 3.0,
+    "priority_level": "Low Priority",
+    "category": "Social & Entertainment",
     "reasoning": "Brief explanation of why this priority was assigned",
-    "time_flexibility": "rigid|semi-flexible|flexible",
-    "consequences_of_delay": "High|Medium|Low"
+    "time_flexibility": "flexible",
+    "consequences_of_delay": "Low"
 }}
 
 Priority Levels (use exactly these strings):
@@ -2409,7 +1757,7 @@ Only return valid JSON, no other text.
         
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a task prioritization expert. Always return only valid JSON."},
                     {"role": "user", "content": prompt}
@@ -2484,7 +1832,7 @@ Analyze the EXACT wording to determine who performs the task.
         
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a task analysis expert. Return only valid JSON."},
                     {"role": "user", "content": prompt}
@@ -2528,7 +1876,7 @@ Possible values for task_catagory:
 """
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a task categorization expert. Return only valid JSON."},
                     {"role": "user", "content": prompt}
@@ -2557,6 +1905,41 @@ def get_meal_type_from_conversation(user_input):
             return meal.capitalize()
     return "Other meal"
 
+def format_items_available(items_text):
+    """
+    Format items_available to show just items with amounts (e.g., '1 kg rice, 500g chicken breast')
+    """
+    try:
+        prompt = f"""
+Extract and format the available items with their amounts in a clean, simple format.
+
+Input: "{items_text}"
+
+Convert to format like: "1 kg rice, 500g chicken breast, 2 onions"
+
+Rules:
+- Extract quantities and ingredients only
+- Use standard units (kg, g, pieces, etc.)
+- Separate multiple items with commas
+- Keep it simple and clear
+
+Return only the formatted items list, nothing else.
+"""
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.1
+        )
+        
+        formatted = response.choices[0].message.content.strip()
+        return formatted if formatted else items_text
+        
+    except Exception:
+        # Fallback formatting
+        return items_text.strip()
+
 def generate_recipy_suggestion(available_items, user_conversation=None):
     """
     Generate a recipe suggestion based on available items using AI knowledge.
@@ -2580,7 +1963,7 @@ Requirements:
 Meal type: {meal_type}
 Available ingredients: {available_items}
 
-Create 3 unique recipes with these names:
+Create 3 unique recipes with these names (NO ### symbols):
 - Recipe 1: [Creative name using available ingredients]
 - Recipe 2: [Different creative name using available ingredients] 
 - Recipe 3: [Third different creative name using available ingredients]
@@ -2591,12 +1974,13 @@ For each recipe, write 5-6 sentences with:
 - Tips for mothers and kids
 - Serving suggestions
 
+IMPORTANT: Do NOT use ### symbols or markdown formatting in recipe names. Use plain text only.
 Format your response as a clear list of 3 recipes with names and detailed descriptions.
 """
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful recipe expert. Create detailed, unique recipes using only the provided ingredients."},
                 {"role": "user", "content": prompt}
@@ -2614,11 +1998,36 @@ Format your response as a clear list of 3 recipes with names and detailed descri
         # Fallback to manual recipe creation
         return create_smart_recipe_from_ingredients(available_items, now, meal_type)
 
+def fix_unicode_encoding(text):
+    """
+    Fix Unicode encoding issues in recipe text to make temperatures and symbols readable.
+    """
+    # Fix Unicode temperature symbols
+    text = text.replace("\\u00b0C", " celsius")
+    text = text.replace("\\u00b0F", " fahrenheit")
+    text = text.replace("\u00b0C", " celsius")
+    text = text.replace("\u00b0F", " fahrenheit")
+    # Fix other Unicode characters
+    text = text.replace("\\u2019", "'")
+    text = text.replace("\u2019", "'")
+    text = text.replace("\\u201c", '"')
+    text = text.replace("\u201c", '"')
+    text = text.replace("\\u201d", '"')
+    text = text.replace("\u201d", '"')
+    text = text.replace("\\u2013", "-")
+    text = text.replace("\u2013", "-")
+    text = text.replace("\\u2014", "—")
+    text = text.replace("\u2014", "—")
+    return text
+
 def explain_cooking_terms(text):
     """
     Add explanations for difficult cooking terms in the recipe text.
     For example, 'sauté' will be explained the first time it appears.
     """
+    # First fix any Unicode encoding issues
+    text = fix_unicode_encoding(text)
+    
     # Dictionary of terms and their explanations
     explanations = {
         "sauté": "sauté (cook quickly in a small amount of oil or butter over medium-high heat)",
@@ -2687,14 +2096,20 @@ def parse_ai_recipe_response(ai_response, available_items, now, meal_type):
             recipes.append(f"Recipe {recipe_count}: {explained_recipe}")
             recipe_names.append(f"Recipe {recipe_count}: Mixed Ingredient Dish")
 
+        # Clean recipe names to remove ### symbols
+        cleaned_recipe_names = [name.replace("###", "").strip() for name in recipe_names[:3]]
+        
+        # Format items_available to show just items with amounts
+        formatted_items = format_items_available(available_items)
+        
         return {
             "meal_type": meal_type,
             "task_catagory": "Recipy task",
             "time": now.strftime('%H:%M'),  # Changed to 24-hour format
             "date": now.strftime('%Y-%m-%d'),
-            "items_available": available_items,
+            "items_available": formatted_items,
             "items_needed": "Cooking oil, salt, black pepper, water, onions",
-            "recipy_name": recipe_names[:3],
+            "recipy_name": cleaned_recipe_names,
             "recipy": recipes[:3]
         }
 
@@ -2748,12 +2163,15 @@ def create_smart_recipe_from_ingredients(available_items, now, meal_type):
             "Recipe 3: Simple Homestyle Preparation: Cook your ingredients with seasonings using traditional methods for a comforting, nutritious meal that the whole family will enjoy."
         ]
     
+    # Format items_available to show just items with amounts
+    formatted_items = format_items_available(available_items)
+    
     return {
         "meal_type": meal_type,
         "task_catagory": "Recipy task",
         "time": now.strftime('%H:%M'),  # Changed to 24-hour format
         "date": now.strftime('%Y-%m-%d'),
-        "items_available": available_items,
+        "items_available": formatted_items,
         "items_needed": "Cooking oil, salt, black pepper, water",
         "recipy_name": recipe_names[:3],
         "recipy": recipes[:3]
@@ -2783,7 +2201,7 @@ def generate_task_analysis(user_input):
         )
         try:
             response = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20,
                 temperature=0.2
@@ -2798,11 +2216,12 @@ def generate_task_analysis(user_input):
     for t in extracted:
         priority_data = prioritizer.analyze_task_priority(
             t["task_name"],
-            context=f"Other tasks: {all_task_descriptions}"
+            context=f"Original user input: {user_input}. Other tasks: {all_task_descriptions}"
         )
+        # Pass the original user input for better assignment detection
         task_assigned = prioritizer.analyze_task_responsibility(
             t["task_name"],
-            context=f"Other tasks: {all_task_descriptions}"
+            context=f"Original user input: {user_input}. Other tasks: {all_task_descriptions}"
         )
         task_catagory = prioritizer.analyze_task_catagory(
             t["task_name"],
@@ -2829,21 +2248,14 @@ def generate_task_analysis(user_input):
     for group in grouped.values():
         # Sort by priority_score descending
         group_sorted = sorted(group, key=lambda x: -x["priority_score"])
-        for idx, task in enumerate(group_sorted):
-            # Highest priority in group stays as is, others get downgraded
-            if idx == 0:
-                final_priority = "High Priority"
-            elif idx == 1:
-                final_priority = "Medium Priority"
-            else:
-                final_priority = "Low Priority"
-            # Always include all tasks, just adjust priority
+        for task in group_sorted:
+            # Use the AI-determined priority instead of overriding it
             final_tasks.append({
                 "task_name": task["task_name"],
                 "time": task["time"],
                 "date": task["date"],
                 "task_assigned": task["task_assigned"],
-                "priority": final_priority,
+                "priority": task["priority"],  # Use original AI-determined priority
                 "task_catagory": task["task_catagory"]
             })
 
@@ -2861,37 +2273,45 @@ def generate_task_analysis(user_input):
 
 # 💬 Conversation Management
 def add_to_conversation(role, content):
-    """Add message to conversation history"""
-    global conversation_history
-    conversation_history.append({"role": role, "content": content})
-    
-    # Keep manageable history
-    if len(conversation_history) > 25:
-        conversation_history = [conversation_history[0]] + conversation_history[-24:]
+    """Add message to a session's conversation history. If session id not provided, use global."""
+    # Deprecated: keep signature same for backward compatibility by accepting session embedded in content
+    # Expect content possibly as tuple (session_id, text) for internal calls
+    if isinstance(content, tuple) and len(content) == 2:
+        session_id, text = content
+    else:
+        # no session provided; use global
+        session_id, text = "__global__", content
+    hist = get_session_history(session_id)
+    hist.append({"role": role, "content": text})
+    # Keep manageable history per session
+    if len(hist) > 25:
+        _session_histories[session_id] = [hist[0]] + hist[-24:]
 
 def get_mama_response(user_input):
-    """Get AI response with mama's context"""
+    """Get AI response with mama's context.
+
+    Backwards-compatible: uses global session if no session_id provided. New callers should pass session_id to avoid cross-user mixing.
+    """
+    return get_mama_response_for_session(user_input, session_id=None, creative=False)
+
+
+def get_mama_response_for_session(user_input, session_id=None, creative=False, seed=None):
+    """Get assistant response using session-scoped history.
+
+    creative=False uses temperature=0.1 (deterministic). creative=True uses temperature=0.5.
+    """
     try:
         print("💭 Task Mama is thinking of the perfect response...")
-        
-        add_to_conversation("user", user_input)
-        
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=conversation_history,
-            max_tokens=300,
-            temperature=0.8
-        )
-        
-        ai_response = response.choices[0].message.content
-        add_to_conversation("assistant", ai_response)
-        
-        return ai_response
-        
+        sid = session_id or "__global__"
+        hist = get_session_history(sid)
+        hist.append({"role": "user", "content": user_input})
+        temp = 0.5 if creative else 0.1
+        ai_text = openai_chat(hist, max_tokens=300, temperature=temp, seed=seed)
+        # append assistant reply
+        hist.append({"role": "assistant", "content": ai_text})
+        return ai_text
     except Exception as e:
         print(f"🚫 AI Response Error: {e}")
-        
-        # Warm fallback responses for mama
         fallback_responses = [
             "Oh sweetie, I'm having a little technical hiccup, but I'm still here for you! 💕 Tell me what's on your heart.",
             "Mama, I'm experiencing some connection issues, but you're not alone! 🤗 How can I support you right now?",
@@ -2919,6 +2339,8 @@ def chat_with_task_mama():
     print("🌸 Task Mama: Type your messages and I'll be here to help! 💖")
     print("="*70)
 
+    # create a session id per chat run to isolate conversation histories
+    session_id = f"session_{int(time.time()*1000)}_{random.randint(1000,9999)}"
     while True:
         try:
             # Get user input via text
@@ -2934,8 +2356,24 @@ def chat_with_task_mama():
 
             # Check if user wants to exit
             if user_input and user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
-                print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
-                return
+                # If stdin is interactive, confirm; if piped (non-interactive), just exit
+                try:
+                    if os.isatty(0):
+                        confirm = input("🌸 Are you sure you want to exit? (yes/no): ").strip().lower()
+                        if confirm in ['y', 'yes']:
+                            print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
+                            return
+                        else:
+                            print("🌸 Task Mama: Okay, I'm still here whenever you are ready! 💕")
+                            continue
+                    else:
+                        # non-interactive stdin (piped) - exit immediately
+                        print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
+                        return
+                except Exception:
+                    # On any error determining tty, just exit safely
+                    print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
+                    return
 
             # If no valid input, continue
             if not user_input:
@@ -2965,7 +2403,8 @@ def chat_with_task_mama():
                 print(json.dumps(progress_json, indent=2))
                 
                 # Generate motivational message (now includes tired check)
-                motivational_message = generate_motivational_message(task_name, percentage)
+                # deterministic motivational message (seed can be provided per session for reproducibility)
+                motivational_message = generate_motivational_message(task_name, percentage, session_id=session_id, seed=42)
                 print(f"🌸 Task Mama: {motivational_message}")
                 
                 # ⭐ NEW: Always ask if they want a pep talk (regardless of completion percentage)
@@ -2977,17 +2416,19 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
                     return
                 elif wants_pep_talk(pep_response):
-                    # ⭐ NEW: Show JSON with voice URL from API for pep talk
-                    voice_url = get_peptalk_voice_url()
+                    # ⭐ NEW: Classify emotion and fetch peptalk from that emotion group
+                    detected = analyze_mama_emotions(user_input, seed=42)
+                    peptalk_class = classify_user_emotion_to_peptalk_class(user_input, detected)
+                    voice_url = get_peptalk_voice_url_by_emotion(peptalk_class)
+                    if not voice_url:
+                        # Fallback to generic fetch
+                        voice_url = get_peptalk_voice_url()
+
                     if voice_url:
-                        pep_talk_json = {
-                            "url": voice_url
-                        }
+                        pep_talk_json = {"url": voice_url, "class": peptalk_class}
                     else:
                         # Fallback to default URL if API fails
-                        pep_talk_json = {
-                            "url": "\\media\\voices\\default-peptalk.mp3"
-                        }
+                        pep_talk_json = {"url": "\\media\\voices\\default-peptalk.mp3", "class": peptalk_class}
                     print("🌸 Here's your motivational pep talk:")
                     print(json.dumps(pep_talk_json, indent=2))
                     print("🌸 Task Mama: Enjoy this special pep talk just for you, beautiful mama! 💕✨")
@@ -3050,10 +2491,19 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: No problem! When you want cooking ideas, just tell me what you have available! 💕")
                 continue
 
-            # ⭐ MODIFIED: Check for emotional distress with YouTube pep talk
-            emotions = analyze_mama_emotions(user_input)
+            # ⭐ UPDATED: Check for any emotional state that needs support (all 4 emotion types)
+            emotions = analyze_mama_emotions(user_input, seed=42)
             #print(f"DEBUG: Emotions detected: {emotions}")  # Debug line
-            if (emotions['is_sad'] or emotions['is_overwhelmed'] or emotions.get('is_stressed', False)):
+            
+            # Check if any negative emotion is detected (emotion1, emotion2, or emotion4)
+            needs_support = (emotions.get('is_emotion1', False) or 
+                           emotions.get('is_emotion2', False) or 
+                           emotions.get('is_emotion4', False) or
+                           emotions.get('is_sad', False) or 
+                           emotions.get('is_overwhelmed', False) or 
+                           emotions.get('is_stressed', False))
+            
+            if needs_support:
                 print("🌸 I can sense you might not be feeling your best right now. 💕 Would you like me to share a pep talk to motivate you Mama 💖 (yes/no)?")
                 
                 user_response, pep_status = get_user_input()
@@ -3062,17 +2512,16 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
                     return
                 elif wants_pep_talk(user_response):
-                    # ⭐ NEW: Show JSON with voice URL from API for emotional pep talk
-                    voice_url = get_peptalk_voice_url()
+                    # ⭐ NEW: Classify emotion and fetch peptalk for that emotion
+                    peptalk_class = classify_user_emotion_to_peptalk_class(user_input, emotions)
+                    voice_url = get_peptalk_voice_url_by_emotion(peptalk_class)
+                    if not voice_url:
+                        voice_url = get_peptalk_voice_url()
+
                     if voice_url:
-                        pep_talk_json = {
-                            "url": voice_url
-                        }
+                        pep_talk_json = {"url": voice_url, "class": peptalk_class}
                     else:
-                        # Fallback to default URL if API fails
-                        pep_talk_json = {
-                            "url": "\\media\\voices\\default-peptalk.mp3"
-                        }
+                        pep_talk_json = {"url": "\\media\\voices\\default-peptalk.mp3", "class": peptalk_class}
                     print("🌸 Here's your motivational pep talk:")
                     print(json.dumps(pep_talk_json, indent=2))
                     print("🌸 Task Mama: Enjoy this special pep talk just for you, beautiful mama! 💕✨")
@@ -3080,14 +2529,40 @@ def chat_with_task_mama():
                     print("🌸 Task Mama: That's okay, sweetie. I'm still here to listen and chat with you. 💕")
                 continue
 
-            # Handle happy emotions
-            if emotions['is_happy']:
-                reply = get_mama_response(user_input)
+            # Handle happy emotions (emotion3) - NOW WITH PEP TALK SUPPORT
+            if emotions.get('is_emotion3', False) or emotions.get('is_happy', False):
+                # for normal replies, use deterministic low-temp response unless creativity desired
+                reply = get_mama_response_for_session(user_input, session_id=session_id, creative=False, seed=None)
                 print(f"🌸 Task Mama: {reply}")
+                
+                # ⭐ NEW: Also offer pep talk for happy emotions to celebrate and encourage
+                print("🌸 You sound so positive! Would you like me to share an uplifting pep talk to celebrate your happiness? 💖 (yes/no)")
+                
+                pep_response, pep_status = get_user_input()
+                
+                if pep_status == 'interrupted':
+                    print("🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
+                    return
+                elif wants_pep_talk(pep_response):
+                    # ⭐ NEW: Classify emotion and fetch peptalk for happy emotion
+                    peptalk_class = classify_user_emotion_to_peptalk_class(user_input, emotions)
+                    voice_url = get_peptalk_voice_url_by_emotion(peptalk_class)
+                    if not voice_url:
+                        voice_url = get_peptalk_voice_url()
+
+                    if voice_url:
+                        pep_talk_json = {"url": voice_url, "class": peptalk_class}
+                    else:
+                        pep_talk_json = {"url": "\\media\\voices\\default-peptalk.mp3", "class": peptalk_class}
+                    print("🌸 Here's your celebratory pep talk:")
+                    print(json.dumps(pep_talk_json, indent=2))
+                    print("🌸 Task Mama: Enjoy this special celebration pep talk just for you, beautiful mama! 💕✨")
+                else:
+                    print("🌸 Task Mama: That's okay, sweetie. Keep shining with that beautiful positivity! 💕")
                 continue
 
             # Default: Normal conversation
-            reply = get_mama_response(user_input)
+            reply = get_mama_response_for_session(user_input, session_id=session_id, creative=False, seed=None)
             print(f"🌸 Task Mama: {reply}")
 
         except KeyboardInterrupt:
@@ -3106,3 +2581,45 @@ if __name__ == "__main__":
         chat_with_task_mama()
     except KeyboardInterrupt:
         print("\n🌸 Task Mama: Take care, beautiful mama! You're doing amazingly! 💖✨")
+
+from google.cloud import texttospeech
+import base64
+import os
+from django.conf import settings
+
+def synthesize_speech_neural2_female_base64(text):
+    """Convert text to speech and return base64-encoded audio (no file storage)"""
+    # Set the API key from environment
+    if hasattr(settings, 'GOOGLE_API_KEY') and settings.GOOGLE_API_KEY:
+        os.environ['GOOGLE_API_KEY'] = settings.GOOGLE_API_KEY
+    
+    client = texttospeech.TextToSpeechClient()
+    
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+    
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US",
+        name="en-US-Neural2-F",
+        ssml_gender=texttospeech.SsmlVoiceGender.FEMALE,
+    )
+    
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
+    
+    response = client.synthesize_speech(
+        input=synthesis_input, voice=voice, audio_config=audio_config
+    )
+    
+    # Return base64-encoded audio
+    audio_base64 = base64.b64encode(response.audio_content).decode('utf-8')
+    return audio_base64
+
+
+# Final binding: ensure the canonical motivational function is used at runtime
+# (this overrides any earlier duplicate definitions that may remain in the file)
+try:
+    generate_motivational_message = generate_motivational_message_canonical
+except NameError:
+    # If for any reason the canonical implementation isn't present, leave as-is
+    pass

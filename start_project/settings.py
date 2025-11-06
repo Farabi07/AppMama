@@ -147,7 +147,7 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT'),
     }
 }
-
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', default='')
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
 
@@ -193,21 +193,35 @@ CORS_ALLOWED_ORIGINS = [
     # "https://dreamtourism_it.com",
     
 ]
-
+# # Email Configuration - Office365 SMTP
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_HOST = 'smtp.office365.com'
 EMAIL_PORT = 587
-EMAIL_HOST_USER= "ferdos.khurrom@gmail.com"
-# EMAIL_HOST_PASSWORD = 'vogi iway mqwc dton'   
-EMAIL_HOST_PASSWORD = 'oaoypvqgfaufbdgl'  # <-- your Gmail App Password (not your Gmail login password)
+EMAIL_HOST_USER = 'support@taskmama.app'
+EMAIL_HOST_PASSWORD = 'sgysnqxjtqqqflbj'  # <-- your Office 365 app password
 EMAIL_USE_TLS = True
 
 ADMIN_EMAIL = EMAIL_HOST_USER
 SUPPORT_EMAIL = EMAIL_HOST_USER
 DEFAULT_FROM_EMAIL = ADMIN_EMAIL
 SERVER_EMAIL = ADMIN_EMAIL
+
+# DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = 'smtp.gmail.com'
+# EMAIL_PORT = 587
+# EMAIL_HOST_USER= "ferdos.khurrom@gmail.com"
+# # EMAIL_HOST_PASSWORD = 'vogi iway mqwc dton'   
+# EMAIL_HOST_PASSWORD = 'oaoypvqgfaufbdgl'  # <-- your Gmail App Password (not your Gmail login password)
+# EMAIL_USE_TLS = True
+
+# ADMIN_EMAIL = EMAIL_HOST_USER
+# SUPPORT_EMAIL = EMAIL_HOST_USER
+# DEFAULT_FROM_EMAIL = ADMIN_EMAIL
+# SERVER_EMAIL = ADMIN_EMAIL
 REST_FRAMEWORK = {
   'DEFAULT_AUTHENTICATION_CLASSES': (
     'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -365,7 +379,8 @@ GOOGLE_CALLBACK_URL = os.getenv("GOOGLE_CALLBACK_URL")
 
 # AWS S3 Storage Configuration taskmamabucket
 
-
+AWS_ACCESS_KEY_ID='AKIAZJN445GWBHQ4MH4R'
+AWS_SECRET_ACCESS_KEY='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'
 
 AWS_REGION='eu-central-1'
 AWS_STORAGE_BUCKET_NAME='taskmamabucket'

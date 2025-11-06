@@ -286,7 +286,6 @@ def subscription_status(request):
         })
     
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
 def all_users_subscription_status(request):
     User = get_user_model()
     all_users = User.objects.all()
@@ -307,11 +306,18 @@ def all_users_subscription_status(request):
             status = "non-subscriber"
             non_subscriber_count += 1
 
+        # Get the absolute image URL if image exists
+        if user.image:
+            image_url = request.build_absolute_uri(user.image.url)
+        else:
+            image_url = None
+
         users_list.append({
             "id": user.id,
             "email": user.email,
             "full_name": getattr(user, "full_name", ""),
             "status": status,
+            "image": image_url,
         })
 
     result = {

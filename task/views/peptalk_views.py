@@ -14,7 +14,7 @@ from task.filters import PeptalkFilter
 
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
-
+from collections import defaultdict
 
 
 
@@ -29,33 +29,46 @@ from commons.pagination import Pagination
 	request=PeptalkSerializer,
 	responses=PeptalkSerializer
 )
+
+
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllPeptalk(request):
-	cities = PeptalkData.objects.all()
-	total_elements = cities.count()
+    talks = PeptalkData.objects.all()
+    total_elements = talks.count()
 
-	page = request.query_params.get('page')
-	size = request.query_params.get('size')
+    page = request.query_params.get('page')
+    size = request.query_params.get('size')
 
-	# Pagination
-	pagination = Pagination()
-	pagination.page = page
-	pagination.size = size
-	cities = pagination.paginate_data(cities)
+    # Pagination
+    pagination = Pagination()
+    pagination.page = page
+    pagination.size = size
+    talks = pagination.paginate_data(talks)
 
-	serializer = PeptalkListSerializer(cities, many=True)
+    serializer = PeptalkListSerializer(talks, many=True)
 
-	response = {
-		'cities': serializer.data,
-		'page': pagination.page,
-		'size': pagination.size,
-		'total_pages': pagination.total_pages,
-		'total_elements': total_elements,
-	}
+    # Group by title
+    grouped = defaultdict(list)
+    for item in serializer.data:
+        grouped[item['title']].append(item)
 
-	return Response(response, status=status.HTTP_200_OK)
+    # Build the response as a list of objects, one per title
+    grouped_list = []
+    for title, items in grouped.items():
+        grouped_list.append({
+            "title": title,
+            "items": items
+        })
+
+    response = {
+        'peptalks': grouped_list,
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_elements,
+    }
+
+    return Response(response, status=status.HTTP_200_OK)
 
 
 
