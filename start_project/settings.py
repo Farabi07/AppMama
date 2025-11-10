@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 from django.conf import settings  
+import logging  # added
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -403,4 +404,33 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Logging configuration to reduce noisy debug output in production
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s %(levelname)s %(name)s: %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': LOG_LEVEL,
+    },
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': LOG_LEVEL, 'propagate': False},
+        'httpx': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+        'httpcore': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+        'openai': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+        'urllib3': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+    }
+}
 
