@@ -149,10 +149,14 @@ def _extract_progress(text: str):
     task_name='task'
     if m:
         before=t[:m.start()]
-        if ' of ' in before:
+        # Try to keep only the object phrase after common verb/intents
+        # Support misspellings like 'finnish' as well.
+        split_pat = r"\b(?:completed?|complet|complete|fin+ish(?:ed)?|finish(?:ed)?|done|did|do|have to|need to|must|should|going to|gonna|plan to|try to)\b\s*"
+        parts = re.split(split_pat, before, flags=re.IGNORECASE)
+        if parts and parts[-1].strip():
+            task_name = parts[-1].strip()
+        elif ' of ' in before:
             task_name=before.split(' of ')[-1].strip()
-        elif 'completed ' in before:
-            task_name=before.split('completed ')[-1].strip()
         else:
             words=re.findall(r"\w+", before)
             task_name=' '.join(words[-6:]) if words else 'task'
@@ -205,7 +209,9 @@ def _fetch_peptalk_voice_url(token: str):
         return None
 
 # --- Robust task id matching ---
-STOPWORDS = {"the","a","an","to","for","of","my","our","me","have","has","had","need","must","got","get","at","on","in","with","and","meet","meeting","please","make","show","give","do","did","does","is","are","was","were","be","been","being","finish","finished","complete","completed","done","i","we","you","have","has","had","task"}
+STOPWORDS = {"the","a","an","to","for","of","my","our","me","have","has","had","need","must","got","get","at","on","in","with","and","meet","meeting","please","make","show","give","do","did","does","is","are","was","were","be","been","being","finish","finished","complete","completed","done","i","we","you","have","has","had","task",
+            # assignment/person words to ignore in name matching
+            "partner","spouse","husband","wife","son","daughter","child","kid","kids","self","myself"}
 
 
 def _normalize_name(s: str):
@@ -215,6 +221,16 @@ def _normalize_name(s: str):
     tokens = [w for w in s.split() if w and w not in STOPWORDS]
     # simple stemming for words ending with 'ing'
     tokens = [w[:-3] if w.endswith('ing') and len(w)>5 else w for w in tokens]
+    # normalize common typos
+    REPL = {
+        'grocey':'grocery', 'grocerry':'grocery', 'grocry':'grocery', 'groceries':'grocery',
+        'recipy':'recipe', 'reciepe':'recipe',
+        # appointments
+        'appoinment':'appointment', 'apointment':'appointment', 'appointmant':'appointment',
+        # finish/complete typos to help removal by STOPWORDS later
+        'finnish':'finish', 'finsh':'finish', 'finised':'finished', 'complte':'complete', 'complet':'complete'
+    }
+    tokens = [REPL.get(w, w) for w in tokens]
     return tokens
 
 
@@ -261,7 +277,24 @@ def _candidate_id(task: dict):
     return None
 
 
-def _find_task_id(task_name: str, tasks: list):
+def _slugify(s: str) -> str:
+    s = (s or '').lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.replace(' ', '-')
+
+
+def _find_task_id(task_name: str, tasks: list, who: str | None = None):
+    # Try progress_key exact if present and who known
+    if who in {"self","partner","child"}:
+        tokens = _normalize_name(task_name)
+        slug = '-'.join(tokens) if tokens else _slugify(task_name)
+        pk_guess = f"{who}:{slug}"
+        for t in tasks or []:
+            pk = t.get('progress_key') or t.get('progressKey')
+            if isinstance(pk, str) and pk.lower() == pk_guess:
+                return _candidate_id(t)
+
     # 1) exact/substring match on common fields
     name_raw = (task_name or '').strip()
     name_lc = name_raw.lower()
@@ -289,8 +322,8 @@ def _find_task_id(task_name: str, tasks: list):
         if score > best_score or (contains_all and score >= best_score):
             best_score = score
             best_id = _candidate_id(t)
-    # reasonable threshold; two strong words like 'ramna' 'park' will match
-    if best_score >= 0.35:
+    # slightly lower threshold to allow minor typos like 'grocey' vs 'grocery'
+    if best_score >= 0.30:
         return best_id
 
     return None
@@ -357,8 +390,48 @@ def api_task_progress(request):
 
     auth=request.META.get('HTTP_AUTHORIZATION','')
     token=auth[7:] if auth.startswith('Bearer ') else None
+
+    # Optional direct id/progress_key support from client
+    direct_task_id = body.get('task_id') or body.get('id')
+    progress_key = body.get('progress_key') or body.get('progressKey')
+
     tasks=_get_tasks_from_api(token)
-    task_id=_find_task_id(task_name, tasks)
+
+    # If progress_key provided, resolve it directly
+    task_id = None
+    if progress_key:
+        try:
+            for t in tasks or []:
+                pk = t.get('progress_key') or t.get('progressKey')
+                if isinstance(pk, str) and pk.lower() == str(progress_key).lower():
+                    task_id = _candidate_id(t)
+                    break
+        except Exception:
+            task_id = None
+
+    # If explicit id provided, use it
+    if task_id is None and direct_task_id is not None:
+        task_id = direct_task_id
+
+    # Infer assignment from text and prefilter tasks before fuzzy name match
+    who = None
+    try:
+        who = _assignment_filter(user_input or task_name)
+    except Exception:
+        who = None
+
+    if task_id is None:
+        # prefilter by assignment if known
+        if who and who != 'all':
+            def _match_assignment(v):
+                v=(v or 'Self').lower()
+                if who=='self': return v in ['self','me','myself']
+                if who=='partner': return v in ['partner','spouse','husband','wife']
+                if who=='child': return v in ['child','son','daughter','kid','kids']
+                return True
+            tasks = [t for t in tasks if _match_assignment(t.get('assigned_to_type'))]
+        task_id=_find_task_id(task_name, tasks, who if who in {'self','partner','child'} else None)
+
     if task_id:
         try:
             task=Task.objects.filter(id=task_id, created_by=request.user).first()
@@ -403,7 +476,7 @@ def _assignment_filter(text: str):
     t=(text or '').lower()
     if any(w in t for w in ['partner','spouse','husband','wife']): return 'partner'
     if any(w in t for w in ['son','daughter','child','kid','kids']): return 'child'
-    if any(w in t for w in ['i ',' my ',"i'm","am i","do i","me "]): return 'self'
+    if any(w in t for w in ['i ',' my ','i\'m','am i','do i','me ']): return 'self'
     return 'all'
 
 @csrf_exempt

@@ -188,20 +188,24 @@ def _extract_tasks(text: str):
     prompt = f"""
 Today is {now.strftime('%A')}, {now.strftime('%Y-%m-%d')}.
 Extract ALL actionable, scheduled tasks from the message below.
-Return JSON array of objects with keys: task_name, time (24h or 'Not specified'), date (YYYY-MM-DD).
+Return JSON array of objects with keys: 
+- task_name: keep a clear description PRESERVING the original language about WHO will do it (e.g., "my partner will buy groceries", "my daughter study for exam", "I have a dentist appointment").
+- time: 24h HH:MM or 'Not specified' (convert 3pm->15:00, 9 am->09:00)
+- date: YYYY-MM-DD (normalize 'today'/'tomorrow')
+- assigned_to: one of Self | Partner | Child (based on the subject in the sentence)
 Message: {text}
-Only JSON.
+Only JSON array.
 """
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role":"system","content":"Return only valid JSON."},{"role":"user","content":prompt}],
         temperature=0.1,
-        max_tokens=700
+        max_tokens=900
     )
     s = resp.choices[0].message.content.strip()
     if s.startswith("```json"): s = s[7:].rstrip("`").strip()
     arr = json.loads(s)
-    out, seen=set(), []
+    out=set()
     result=[]
     for t in arr:
         d = t.get('date') or now.strftime('%Y-%m-%d')
@@ -209,45 +213,93 @@ Only JSON.
         if str(d).lower()=='today': d = now.strftime('%Y-%m-%d')
         tm = _to_24h(t.get('time') or 'Not specified') or None
         name = (t.get('task_name') or '').strip()
-        if not name: continue
+        assigned_to = (t.get('assigned_to') or '').strip().lower()
+        if assigned_to in ['self','partner','child']:
+            assigned_norm = assigned_to
+        else:
+            assigned_norm = ''
+        if not name: 
+            continue
         key=(name.lower(), tm or '', d)
-        if key in out: continue
+        if key in out: 
+            continue
         out.add(key)
-        result.append({"task_name":name, "date":d, "time": tm})
+        result.append({"task_name":name, "date":d, "time": tm, "assigned_to": assigned_norm})
     return result
 
 def _beautify_task_name(name: str) -> str:
-    """Make task name conversational but preserve meaning (self-contained)."""
+    """Make task name short and natural (2-3 words), performer handled by task_assigned."""
     n = (name or '').strip()
     if not n:
         return 'Task'
-    # Heuristic cleanup: lower then capitalize, remove repeated spaces
-    cleaned = re.sub(r'\s+', ' ', n)
-    try:
-        prompt = (
-            f"Improve this task description to sound natural, keep meaning the same, no extra words: '{cleaned}'. "
-            "Return only the improved text."
-        )
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role":"system","content":"Return only text."},{"role":"user","content":prompt}],
-            temperature=0.2,
-            max_tokens=60
-        )
-        out = resp.choices[0].message.content.strip().strip('"')
-        return out if out else cleaned
-    except Exception:
-        return cleaned
+    txt = re.sub(r'\s+', ' ', n).lower()
+
+    # Remove common lead-ins
+    leadins = [
+        r"^i have to ", r"^i need to ", r"^i gotta ", r"^i will ", r"^i'm going to ", r"^i have a ",
+        r"^my partner (has|have) to ", r"^my partner will ", r"^partner (has|have) to ",
+        r"^my (son|daughter|kid|child) (has|have) to ", r"^my (son|daughter|kid|child) will ",
+        r"^i ", r"^my ", r"^we need to ", r"^we have to ", r"^we will ",
+    ]
+    for pat in leadins:
+        txt = re.sub(pat, '', txt).strip()
+
+    # Normalize key phrases
+    repl = [
+        (r"go to (the )?grocery( store)?( to buy (food|items))?", "grocery shopping"),
+        (r"buy groceries", "grocery shopping"),
+        (r"shopping to buy .*dinner", "dinner shopping"),
+        (r"shopping .* dinner", "dinner shopping"),
+        (r"buy items to cook dinner", "dinner shopping"),
+        (r"cook dinner", "dinner prep"),
+        (r"study .*exam", "exam study"),
+        (r"study for .*exam", "exam study"),
+        (r"dentist appointment", "dentist appointment"),
+        (r"doctor appointment", "doctor appointment"),
+        (r"hospital appointment|clinic appointment|therapy appointment", "medical appointment"),
+    ]
+    for pat, rep in repl:
+        txt = re.sub(pat, rep, txt)
+
+    # If contains grocery and not shopping, make shopping
+    if 'grocery' in txt and 'shopping' not in txt:
+        txt = 'grocery shopping'
+
+    # Generic trims
+    txt = txt.replace(' to buy ', ' ')
+    txt = txt.replace(' for next day\'s ', ' ')
+    txt = txt.replace(' for tomorrow\'s ', ' ')
+
+    # Fallbacks for keywords
+    if 'dentist' in txt and 'appointment' not in txt:
+        txt = 'dentist appointment'
+    if 'study' in txt and 'exam' in txt:
+        txt = 'exam study'
+    if 'shopping' in txt and 'dinner' in txt:
+        txt = 'dinner shopping'
+
+    # Keep to max 3 words
+    words = [w for w in re.split(r'[^a-z]+', txt) if w]
+    if not words:
+        words = ['task']
+    short = ' '.join(words[:3])
+    # Capitalize nicely
+    short = short[:1].upper() + short[1:]
+
+    # If still long or unchanged, optionally try AI (best-effort)
+    if len(short.split()) > 3:
+        short = ' '.join(short.split()[:3])
+    return short
 
 def _analyze_task_responsibility(task_description: str) -> str:
     """Detect who will perform the task (Self/Partner/Child) similar to asif_ai logic."""
     text = (task_description or '').lower()
-    # Heuristic first
-    if any(k in text for k in [' my husband',' my wife',' spouse',' partner']):
+    # Heuristic first with broader synonyms
+    if any(k in text for k in [' my husband',' my wife',' spouse',' partner',' my partner']):
         return 'partner'
-    if any(k in text for k in [' my son',' my daughter',' child',' kid',' kids']):
+    if any(k in text for k in [' my son',' my daughter',' child',' kid',' kids',' daughter ',' son ']):
         return 'child'
-    if any(k in text for k in [' i ',' i\'m',' i\'ll',' i will',' i have to',' i need to']):
+    if any(k in text for k in [' i ',' i\'m',' i\'ll',' i will',' i have to',' i need to',' my appointment',' i have a']):
         return 'self'
     # AI refinement
     try:
@@ -262,7 +314,7 @@ def _analyze_task_responsibility(task_description: str) -> str:
         )
         ans = resp.choices[0].message.content.strip().lower()
         if 'partner' in ans: return 'partner'
-        if 'child' in ans or 'kid' in ans: return 'child'
+        if 'child' in ans or 'kid' in ans or 'daughter' in ans or 'son' in ans: return 'child'
         return 'self'
     except Exception:
         return 'self'
@@ -287,7 +339,10 @@ def _save_task(t: dict, user):
     original_name = t.get('task_name')
     fluent_name = _beautify_task_name(original_name)
     priority_data = _analyze_task_priority(original_name)
-    assigned = _analyze_task_responsibility(original_name)
+    # Prefer assigned_to from extraction
+    assigned = (t.get('assigned_to') or '')
+    if assigned not in ['self','partner','child']:
+        assigned = _analyze_task_responsibility(original_name)
     category = _categorize_task(original_name)
     task = Task.objects.create(
         task_name=fluent_name,
@@ -302,6 +357,13 @@ def _save_task(t: dict, user):
         raw_ai_response={**t, "priority": priority_data, "assigned_to_type": assigned, "category": category, "fluent_name": fluent_name}
     )
     return task
+
+def _make_progress_key(short_name: str, assigned: str) -> str:
+    """Stable key to match progress updates: '<assigned>:<slugified-short-name>'"""
+    a = (assigned or 'self').lower()
+    base = (short_name or 'task').lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', base).strip('-')
+    return f"{a}:{slug}" if slug else f"{a}:task"
 
 @csrf_exempt
 @api_view(['POST'])
@@ -331,23 +393,29 @@ def api_task_plan_step2_generate(request):
     enriched = []
     for t in tasks:
         try:
+            assigned_norm = (t.get('assigned_to') or '')
+            if assigned_norm not in ['self','partner','child']:
+                assigned_norm = _analyze_task_responsibility(t['task_name'])
+            short_name = _beautify_task_name(t['task_name'])
+            # Ensure assigned_to is set for saver
+            t['assigned_to'] = assigned_norm
+            created = _save_task(t, request.user)
             pr = _analyze_task_priority(t['task_name'])
-            assigned = _analyze_task_responsibility(t['task_name'])
             category = _categorize_task(t['task_name'])
-            # Map to asif_ai-like response keys
             display = {
-                "task_name": t['task_name'],
+                "task_id": created.id,
+                "task_name": short_name,
                 "time": t.get('time'),
                 "date": t.get('date'),
-                "task_assigned": assigned.capitalize(),
+                "task_assigned": assigned_norm.capitalize(),
                 "priority": pr['priority_level'],
                 "task_catagory": category,
+                "progress_key": _make_progress_key(short_name, assigned_norm),
             }
             enriched.append(display)
-            _save_task(t, request.user)
         except Exception:
             enriched.append({
-                "task_name": t.get('task_name'),
+                "task_name": _beautify_task_name(t.get('task_name')), 
                 "time": t.get('time'),
                 "date": t.get('date'),
                 "task_assigned": "Self",
@@ -369,7 +437,6 @@ def api_task_plan_step2_generate(request):
 def api_task_plan_combined(request):
     body = request.data or {}
     text = (body.get('tasks_text') or body.get('user_input') or '').strip()
-    # Trigger prompt phase if no text OR detected intent-only planning request
     if (not text) or (detect_task_planning_request(text)):
         return JsonResponse(_with_tts({
             "type": "task_planning_prompt",
@@ -377,27 +444,32 @@ def api_task_plan_combined(request):
             "data": {"awaiting_tasks": True, "recognized_intent": bool(text)},
         }), status=200)
 
-    # Step2-style generation when tasks are provided
     tasks = _extract_tasks(text)
     enriched = []
     for t in tasks:
         try:
+            assigned_norm = (t.get('assigned_to') or '')
+            if assigned_norm not in ['self','partner','child']:
+                assigned_norm = _analyze_task_responsibility(t['task_name'])
+            short_name = _beautify_task_name(t['task_name'])
+            t['assigned_to'] = assigned_norm
+            created = _save_task(t, request.user)
             pr = _analyze_task_priority(t['task_name'])
-            assigned = _analyze_task_responsibility(t['task_name'])
             category = _categorize_task(t['task_name'])
             display = {
-                "task_name": t['task_name'],
+                "task_id": created.id,
+                "task_name": short_name,
                 "time": t.get('time'),
                 "date": t.get('date'),
-                "task_assigned": assigned.capitalize(),
+                "task_assigned": assigned_norm.capitalize(),
                 "priority": pr['priority_level'],
                 "task_catagory": category,
+                "progress_key": _make_progress_key(short_name, assigned_norm),
             }
             enriched.append(display)
-            _save_task(t, request.user)
         except Exception:
             enriched.append({
-                "task_name": t.get('task_name'),
+                "task_name": _beautify_task_name(t.get('task_name')),
                 "time": t.get('time'),
                 "date": t.get('date'),
                 "task_assigned": "Self",

@@ -20,6 +20,103 @@ from rest_framework.permissions import IsAuthenticated
 from notification.models import Notification
 from notification.serializers import NotificationSerializer
 from rest_framework.response import Response
+from notification.models import DeviceToken, PushReminder  # new imports
+import os, json, requests  # for FCM
+
+FCM_SERVER_KEY = os.getenv('FCM_SERVER_KEY')
+
+# Register / update device token
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_device_token(request):
+    token = (request.data.get('token') or '').strip()
+    platform = (request.data.get('platform') or '').strip()
+    if not token:
+        return Response({'error': 'token required'}, status=400)
+    obj, created = DeviceToken.objects.update_or_create(
+        token=token,
+        defaults={'user': request.user, 'platform': platform}
+    )
+    return Response({'status': 'ok', 'created': created})
+
+# Internal helper to send FCM (simple)
+def _send_fcm(token: str, title: str, body: str, data: dict=None):
+    if not FCM_SERVER_KEY:
+        return False
+    payload = {
+        'to': token,
+        'notification': {'title': title, 'body': body},
+        'data': data or {}
+    }
+    headers = {
+        'Authorization': f'key={FCM_SERVER_KEY}',
+        'Content-Type': 'application/json'
+    }
+    try:
+        r = requests.post('https://fcm.googleapis.com/fcm/send', headers=headers, data=json.dumps(payload), timeout=5)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+# Background reminder trigger (can be called from Celery / cron)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def trigger_push_reminders_now(request):
+    if not request.user.is_staff:
+        return Response({'error': 'forbidden'}, status=403)
+    _generate_and_push_reminders()
+    return Response({'status': 'triggered'})
+
+
+def _eligible_tasks_for_user(user, today):
+    if user.role == 'admin':
+        qs = Task.objects.filter(
+            assigned_to_type='self', created_by=user, status__in=['pending','in_progress'],
+            scheduled_date__range=[today, today + timedelta(days=3)]
+        )
+    elif user.role == 'partner':
+        qs = Task.objects.filter(
+            assigned_to_type='partner', status__in=['pending','in_progress'],
+            scheduled_date__range=[today, today + timedelta(days=2)]
+        )
+    elif user.role == 'child':
+        qs = Task.objects.filter(
+            assigned_to_type='child', status__in=['pending','in_progress'],
+            scheduled_date__range=[today, today + timedelta(days=2)]
+        )
+    else:
+        qs = Task.objects.none()
+    return qs
+
+
+def _generate_and_push_reminders():
+    today = date.today()
+    # Iterate distinct users having tasks in window
+    user_ids = Task.objects.filter(status__in=['pending','in_progress']).values_list('created_by', flat=True).distinct()
+    from authentication.models import User
+    for uid in user_ids:
+        try:
+            user = User.objects.get(id=uid)
+        except User.DoesNotExist:
+            continue
+        tasks = _eligible_tasks_for_user(user, today)
+        if not tasks.exists():
+            continue
+        tokens = list(DeviceToken.objects.filter(user=user).values_list('token', flat=True))
+        if not tokens:
+            continue
+        for task in tasks:
+            # Deduplicate per day
+            exists = PushReminder.objects.filter(user=user, task=task, reminder_date=today).exists()
+            if exists:
+                continue
+            days_left = (task.scheduled_date - today).days
+            title = 'Task Reminder'
+            body = f"{task.task_name} in {days_left} day(s) at {task.scheduled_time or ''}".strip()
+            data = {'type': 'task_reminder', 'task_id': task.id}
+            for tk in tokens:
+                _send_fcm(tk, title, body, data)
+            PushReminder.objects.create(user=user, task=task, reminder_date=today)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

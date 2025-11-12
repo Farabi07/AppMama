@@ -44,3 +44,29 @@ class Contact(models.Model):
     class Meta:
         verbose_name = "Contact"
         verbose_name_plural = "Contacts"
+
+
+# New: Device token storage for push notifications
+class DeviceToken(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='device_tokens')
+    token = models.CharField(max_length=512, unique=True)
+    platform = models.CharField(max_length=20, blank=True, null=True)  # android/ios/web
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user_id}:{self.platform}"
+
+
+# New: Deduplicate push reminders per user-task per day
+class PushReminder(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='push_reminders')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='push_reminders')
+    reminder_date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'task', 'reminder_date')
+
+    def __str__(self):
+        return f"Reminder {self.user_id}-{self.task_id}-{self.reminder_date}"
