@@ -380,8 +380,8 @@ GOOGLE_CALLBACK_URL = os.getenv("GOOGLE_CALLBACK_URL")
 
 # AWS S3 Storage Configuration taskmamabucket
 
-AWS_ACCESS_KEY_ID='AKIAZJN445GWBHQ4MH4R'
-AWS_SECRET_ACCESS_KEY='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'
+AWS_ACCESS_KEY_ID=os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY=os.getenv('AWS_SECRET_ACCESS_KEY')
 
 AWS_REGION='eu-central-1'
 AWS_STORAGE_BUCKET_NAME='taskmamabucket'
@@ -394,8 +394,6 @@ DEFAULT_FILE_STORAGE = 'start_project.storage_backends.PublicMediaStorage'
 AWS_S3_OBJECT_PARAMETERS = {
     'CacheControl': 'max-age=86400',
 }
-
-
 
  # This is the base directory for your project
 

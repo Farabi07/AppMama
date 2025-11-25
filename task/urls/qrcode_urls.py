@@ -4,18 +4,14 @@ from task.views import qrcode_views as views
 
 
 urlpatterns = [
-	# path('api/v1/client/all/', views.getAllQRTaskData),
-
-	# path('api/v1/client/without_pagination/all/', views.getAllQRTaskDataWithoutPagination),
-
-	# path('api/v1/client/<int:pk>', views.getAQRTaskData),
-
-	# path('api/v1/client/search/', views.searchQRTaskData),
-
-	path('api/v1/qrcode_image_generate/create/', views.createQRTaskData),
+	# Simplified, user-friendly URLs
+	path('create/', views.createQRTaskData, name='create_qr_task'),
     path('view/<int:pk>/', views.qr_task_view, name='qr_task_view'),
-
-	# path('api/v1/client/update/<int:pk>', views.updateQRTaskData),
+    path('update/<int:pk>/', views.update_qr_task_metadata, name='update_qr_task_metadata'),
+    
+    # Legacy URL support (backwards compatibility)
+	path('api/v1/qrcode_image_generate/create/', views.createQRTaskData),
+    path('api/v1/qrcode/update/<int:pk>/', views.update_qr_task_metadata),
 
 	# path('api/v1/client/delete/<int:pk>', views.deleteQRTaskData),
 
