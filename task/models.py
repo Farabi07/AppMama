@@ -234,8 +234,17 @@ class Receipt(models.Model):
     # Timestamps for when the receipt was uploaded and processed
     uploaded_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True,blank=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True,blank=True, null=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(blank=True, null=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        related_name="deleted_receipts", 
+        null=True, 
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete= models.SET_NULL, related_name="+", null=True, blank=True)
@@ -245,12 +254,22 @@ class Receipt(models.Model):
     def __str__(self):
         return f"Receipt {self.id} - {self.shop_name} - {self.date}"
 
-    def save(self, *args, **kwargs):
-        if self.extracted_data:
-            # Automatically set the processed_at field when the receipt is processed
-            self.processed_at = self.processed_at or models.DateTimeField(auto_now_add=True).default
-        super().save(*args, **kwargs)
+    def save(self, *args, skip_recalc: bool = False, **kwargs):
+        """
+        Combined save:
+         - set processed_at when extracted_data is present
+         - support skip_recalc flag for views to avoid triggering recalculation logic/signals
+        """
+        # set processed_at if we have extracted_data and processed_at is empty
+        if getattr(self, "extracted_data", None) and not self.processed_at:
+            from django.utils import timezone
+            self.processed_at = timezone.now()
 
+        # mark instance so post_save handlers can skip recalculation
+        setattr(self, "_skip_recalc", bool(skip_recalc))
+
+        # perform normal save (honor update_fields if provided)
+        super().save(*args, **kwargs)
 class Client(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="clients", null=True, blank=True)
     name = models.CharField(max_length=200, null=True, blank=True)

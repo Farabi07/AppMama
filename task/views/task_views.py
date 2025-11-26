@@ -16,8 +16,8 @@ from task.filters import TaskFilter
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
 from django.utils import timezone
-
-
+import json 
+from datetime import timedelta
 
 # Create your views here.
 
@@ -278,3 +278,33 @@ def getAllHealthTask(request):
 
     return Response(response, status=status.HTTP_200_OK)
 
+@extend_schema( request={"type": "object", "properties": {"task_ids": {"type": "array", "items": {"type": "integer"}}, "recurrence": {"type":"object"}}}, responses={200: TaskListSerializer} ) 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated]) 
+def setTasksRecurring(request):
+    """ Mark selected tasks as recurring. Body example: { "task_ids": [1,2,3], "recurrence": {"pattern":"daily"|"weekly"|"monthly", "interval":1} } Only tasks owned by request.user (created_by) will be updated. """
+    data = request.data or {}
+    task_ids = data.get('task_ids') or []
+    recurrence = data.get('recurrence') or {}
+
+    if not isinstance(task_ids, list) or not task_ids:
+        return Response({"error": "task_ids must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
+
+    pattern = (recurrence.get('pattern') or '').lower()
+    if pattern and pattern not in ('daily', 'weekly', 'monthly'):
+        return Response({"error": "recurrence.pattern must be one of: daily, weekly, monthly"}, status=status.HTTP_400_BAD_REQUEST)
+
+    qs = Task.objects.filter(pk__in=task_ids, created_by=request.user)
+    updated_count = 0
+    for t in qs:
+        t.is_recurring = True
+        # store recurrence as JSON string in recurrence_pattern (model field is CharField)
+        try:
+            t.recurrence_pattern = json.dumps(recurrence)
+        except Exception:
+            t.recurrence_pattern = str(recurrence)
+        t.save(update_fields=['is_recurring', 'recurrence_pattern', 'updated_at'])
+        updated_count += 1
+
+    serializer = TaskListSerializer(qs, many=True)
+    return Response({"updated_count": updated_count, "tasks": serializer.data}, status=status.HTTP_200_OK)

@@ -1,5 +1,6 @@
 from django.core.exceptions import ObjectDoesNotExist
 
+from httpcore import request
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -18,9 +19,9 @@ from commons.enums import PermissionEnum
 from commons.pagination import Pagination
 
 from django.db.models import Sum
-
+from django.db.models import Q
 from datetime import datetime, timedelta
-
+from django.utils import timezone
 
 @extend_schema(
     parameters=[
@@ -34,9 +35,12 @@ from datetime import datetime, timedelta
 # @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllReceipt(request):
-    # Fetch all receipts
-    recipts = Receipt.objects.all()
-    total_elements = recipts.count()
+    """
+    Fetch all non-deleted receipts with pagination
+    """
+    # Filter out soft-deleted receipts
+    receipts = Receipt.objects.filter(is_deleted=False)
+    total_elements = receipts.count()
 
     page = request.query_params.get('page')
     size = request.query_params.get('size')
@@ -46,14 +50,14 @@ def getAllReceipt(request):
     pagination.page = page
     pagination.size = size
 
-    # Corrected variable name to 'recipts'
-    recipts = pagination.paginate_data(recipts)
+    # Paginate the filtered receipts
+    receipts = pagination.paginate_data(receipts)
 
     # Serialize the paginated receipts
-    serializer = ReceiptListSerializer(recipts, many=True)
+    serializer = ReceiptListSerializer(receipts, many=True)
 
     response = {
-        'reciept': serializer.data,  # Notice the spelling here is correct as 'reciept'
+        'reciept': serializer.data,
         'page': pagination.page,
         'size': pagination.size,
         'total_pages': pagination.total_pages,
@@ -161,78 +165,32 @@ def createReceipt(request):
 	else:
 		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-
-
-# @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
-# @api_view(['PUT'])
-# # @permission_classes([IsAuthenticated])
-# # @has_permissions([PermissionEnum.PERMISSION_UPDATE.name, PermissionEnum.PERMISSION_PARTIAL_UPDATE.name])
-# def updateReceipt(request, pk):
-#     try:
-#         # Fetch the existing receipt object
-#         receipt = Receipt.objects.get(pk=pk)
-
-#         # Get the updated data from the request
-#         data = request.data
-
-#         # Remove 'extracted_data' from the incoming data if it's there
-#         data.pop('extracted_data', None)
-
-#         # Use the serializer for partial update (allow updating only the provided fields)
-#         serializer = ReceiptSerializer(receipt, data=data, partial=True)
-
-#         if serializer.is_valid():
-#             # Save the updated receipt
-#             serializer.save()
-
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         else:
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     except ObjectDoesNotExist:
-#         return Response({"detail": f"Receipt with id {pk} does not exist."}, status=status.HTTP_404_NOT_FOUND)
 @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
 @api_view(['PUT'])
 def updateReceipt(request, pk):
     try:
-        # Fetch the existing receipt object
         receipt = Receipt.objects.get(pk=pk)
-
-        # Get the updated data from the request
         data = request.data
-
-        # Remove 'extracted_data' from the incoming data if it's there
         data.pop('extracted_data', None)
 
-        # Handle the update for items
         if 'items' in data:
-            # Get the current items list
-            current_items = receipt.items or []
 
-            # Modify items: Add new, update, or delete items
+            current_items = receipt.items or []
             updated_items = data.get('items', [])
 
-            # Handle deletion by comparing current items and updated items
-            # For simplicity, we'll assume that items have a unique identifier such as 'name'
-            # If your items have an 'id' field, use that instead of 'name'
             for item in current_items[:]:
                 if item not in updated_items:
                     current_items.remove(item)
 
-            # Add new items that are not already in the current list
             for item in updated_items:
                 if item not in current_items:
                     current_items.append(item)
 
-            # Set the updated items list
             receipt.items = current_items
 
-        # Use the serializer for partial update (allow updating only the provided fields)
         serializer = ReceiptSerializer(receipt, data=data, partial=True)
 
         if serializer.is_valid():
-            # Save the updated receipt
             serializer.save()
 
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -247,12 +205,27 @@ def updateReceipt(request, pk):
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_DELETE.name])
 def deleteReceipt(request, pk):
-	try:
-		client = Receipt.objects.get(pk=pk)
-		client.delete()
-		return Response({'detail': f'Receipt id - {pk} is deleted successfully'}, status=status.HTTP_200_OK)
-	except ObjectDoesNotExist:
-		return Response({'detail': f"Receipt id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
+    """
+    Soft delete a receipt by marking it as deleted
+    """
+    try:
+        receipt = Receipt.objects.get(pk=pk, is_deleted=False)
+        
+        # Soft delete the receipt
+        receipt.is_deleted = True
+        receipt.deleted_at = timezone.now()
+        receipt.deleted_by = request.user
+        receipt.save()
+        
+        return Response(
+            {'detail': f'Receipt id - {pk} is deleted successfully'}, 
+            status=status.HTTP_200_OK
+        )
+    except ObjectDoesNotExist:
+        return Response(
+            {'detail': f"Receipt id - {pk} doesn't exist or already deleted"}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 @extend_schema(request=ReceiptSerializer, responses=ReceiptSerializer)
@@ -269,14 +242,10 @@ def addItemtoReceipt(request, receipt_id):
 
     if not name:
         return Response({"error": "Item name is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Prepare new item dictionary
     new_item = {
         "name": name,
         "quantity": qty
     }
-
-    # Append to existing items
     receipt.items = (receipt.items or []) + [new_item]
     receipt.save()
 
@@ -285,86 +254,7 @@ def addItemtoReceipt(request, receipt_id):
         "items": receipt.items
     }, status=status.HTTP_200_OK)
 
-# @api_view(['PUT'])
-# def updateItemOrService(request, receipt_id, type_str, index):
-#     """
-#     Update an item or service in a receipt by index
-#     type_str: 'item' or 'service'
-#     index: position in the JSON array (0-based)
-#     """
-#     receipt = get_object_or_404(Receipt, id=receipt_id)
-    
-#     if type_str not in ['item', 'service']:
-#         return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
 
-#     data_list = receipt.items if type_str == 'item' else receipt.services
-
-#     if not data_list or index < 0 or index >= len(data_list):
-#         return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
-
-#     # Get updated data
-#     name = request.data.get("name", data_list[index].get("name"))
-#     quantity = request.data.get("quantity", data_list[index].get("quantity"))
-
-#     # Update the item/service
-#     data_list[index]["name"] = name
-#     data_list[index]["quantity"] = quantity
-
-#     if type_str == 'item':
-#         receipt.items = data_list
-#     else:
-#         receipt.services = data_list
-
-#     receipt.save()
-
-#     return Response({
-#         "message": f"{type_str.capitalize()} updated successfully",
-#         type_str + "s": data_list
-#     }, status=status.HTTP_200_OK)
-
-# @api_view(['DELETE'])
-# def deleteItemOrService(request, receipt_id, type_str, index):
-#     """
-#     Delete an item or service from a receipt by index
-#     """
-#     receipt = get_object_or_404(Receipt, id=receipt_id)
-
-#     if type_str not in ['item', 'service']:
-#         return Response({"error": "type must be 'item' or 'service'"}, status=status.HTTP_400_BAD_REQUEST)
-
-#     data_list = receipt.items if type_str == 'item' else receipt.services
-
-#     if not data_list or index < 0 or index >= len(data_list):
-#         return Response({"error": f"{type_str} index out of range"}, status=status.HTTP_400_BAD_REQUEST)
-
-#     # Remove the item/service
-#     removed = data_list.pop(index)
-
-#     if type_str == 'item':
-#         receipt.items = data_list
-#     else:
-#         receipt.services = data_list
-
-#     receipt.save()
-
-#     return Response({
-#         "message": f"{type_str.capitalize()} deleted successfully",
-#         "removed": removed,
-#         type_str + "s": data_list
-#     }, status=status.HTTP_200_OK)
-
-
-
-
-
-@extend_schema(
-    parameters=[
-        OpenApiParameter("page", type=int, description="Page number"),
-        OpenApiParameter("size", type=int, description="Page size")
-    ],
-    request=ReceiptListSerializer,
-    responses=ReceiptListSerializer
-)
 @extend_schema(
     parameters=[
         OpenApiParameter("page", type=int, description="Page number"),
@@ -374,38 +264,36 @@ def addItemtoReceipt(request, receipt_id):
     responses=ReceiptListSerializer
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Uncomment if you need permission checks
+@permission_classes([IsAuthenticated])  
 def listReceipts(request):
-    receipt_type = request.GET.get("type")  # "expense", "sales", or None
-    page = int(request.GET.get("page", 1))  # Default page = 1
-    page_size = int(request.GET.get("size", 10))  # Default 10 per page
+    receipt_type = request.GET.get("type")
+    page = int(request.GET.get("page", 1))
+    page_size = int(request.GET.get("size", 10))
 
-    # Filter by receipt_type if provided
+    base_qs = Receipt.objects.filter(is_deleted=False)
+
     if receipt_type:
         if receipt_type not in ["expense", "sales", "pantry"]:
             return Response(
                 {"error": "Invalid type. Use 'expense', 'sales', or 'pantry'"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        receipts = Receipt.objects.filter(receipt_type=receipt_type)
+        receipts = base_qs.filter(receipt_type=receipt_type)
     else:
-        receipts = Receipt.objects.all()
+        receipts = base_qs
 
     # Pagination
     total_count = receipts.count()
-    pagination = Pagination()  # Assuming you have a custom Pagination class
+    pagination = Pagination()  
     pagination.page = page
     pagination.size = page_size
 
-    # Paginate the queryset
     receipts = pagination.paginate_data(receipts)
 
-    # Serialize the paginated receipts
     serializer = ReceiptCustomSerializer(receipts, many=True)
 
-    # Prepare the response data
     response = {
-        'reciept': serializer.data,  # Returning the serialized receipt data
+        'reciept': serializer.data,
         'page': pagination.page,
         'size': pagination.size,
         'total_pages': pagination.total_pages,
@@ -416,23 +304,14 @@ def listReceipts(request):
 
 @api_view(['POST'])
 def monthly_report(request):
-    # Get the current date
     current_date = datetime.now()
-
-    # Get the first day of the current month (start of the month)
     month_start = current_date.replace(day=1)
+    next_month = month_start.replace(day=28) + timedelta(days=4)
+    month_end = next_month - timedelta(days=next_month.day)
 
-    # Get the last day of the current month (end of the month)
-    next_month = month_start.replace(day=28) + timedelta(days=4)  # this gives the first day of next month
-    month_end = next_month - timedelta(days=next_month.day)  # subtract days to get the last day of the current month
-
-    # Get the first day of last month
     last_month_start = (month_start - timedelta(days=1)).replace(day=1)
-
-    # Get the last day of last month
     last_month_end = month_start - timedelta(days=1)
 
-    # Filter receipts for the current month based on the 'date' field (convert to datetime)
     sales_receipts = Receipt.objects.filter(
         date__gte=month_start.strftime('%m/%d/%Y'), 
         date__lte=month_end.strftime('%m/%d/%Y'), 
@@ -444,7 +323,6 @@ def monthly_report(request):
         receipt_type='expense'
     )
 
-    # Filter receipts for last month based on the 'date' field
     last_month_sales_receipts = Receipt.objects.filter(
         date__gte=last_month_start.strftime('%m/%d/%Y'), 
         date__lte=last_month_end.strftime('%m/%d/%Y'), 
@@ -456,17 +334,14 @@ def monthly_report(request):
         receipt_type='expense'
     )
 
-    # Calculate total sales, expenses, and profit for the current month
     total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
     total_expenses = expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
     profit = total_sales - total_expenses
 
-    # Calculate total sales, expenses, and profit for last month
     last_month_sales = last_month_sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
     last_month_expenses = last_month_expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
     last_month_profit = last_month_sales - last_month_expenses
 
-    # Calculate percentage change in profit and expenses from last month
     profit_change_percentage = 0
     expense_change_percentage = 0
 
@@ -476,19 +351,17 @@ def monthly_report(request):
     if last_month_expenses != 0:
         expense_change_percentage = ((total_expenses - last_month_expenses) / last_month_expenses) * 100
 
-    # Format the percentages to 2 decimal places and add the '%' sign
     profit_change_percentage = f"{profit_change_percentage:.2f}%"
     expense_change_percentage = f"{expense_change_percentage:.2f}%"
 
-    # Prepare the response data
     report_data = {
-        "month_year": current_date.strftime("%Y-%m"),  # Current month in "YYYY-MM" format
+        "month_year": current_date.strftime("%Y-%m"), 
         "total_sales": total_sales,
         "total_expenses": total_expenses,
         "profit": profit,
         "last_month_sales": last_month_sales,
         "last_month_expenses": last_month_expenses,
-        "last_month_profit": last_month_profit,  # Include last month's profit
+        "last_month_profit": last_month_profit,
         "profit_change_percentage": profit_change_percentage,
         "expense_change_percentage": expense_change_percentage,
     }
@@ -498,29 +371,20 @@ def monthly_report(request):
 
 @api_view(['POST'])
 def monthly_statistics(request):
-    # Get the current date
     current_date = datetime.now()
-
-    # Get the first day of the current month (start of the month)
     month_start = current_date.replace(day=1)
 
-    # Get the first day of the previous month
     last_month_start = (month_start - timedelta(days=1)).replace(day=1)
 
-    # Get the number of months you want to look back
-    months_back = 6  # Last 6 months including the current month
+    months_back = 6  
 
-    # Initialize a list to hold monthly data
     monthly_data = []
 
-    # Loop through the last few months
     for month_offset in range(months_back):
-        # Calculate the first and last day of the month
         month_start_date = (month_start - timedelta(days=month_offset * 30)).replace(day=1)
         next_month = month_start_date.replace(day=28) + timedelta(days=4)
         month_end_date = next_month - timedelta(days=next_month.day)
 
-        # Get the sales and expense receipts for the given month
         sales_receipts = Receipt.objects.filter(
             date__gte=month_start_date.strftime('%m/%d/%Y'),
             date__lte=month_end_date.strftime('%m/%d/%Y'),
@@ -532,18 +396,247 @@ def monthly_statistics(request):
             receipt_type='expense'
         )
 
-        # Calculate total sales, expenses, and profit for the month
         total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
         total_expenses = expense_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
         profit = total_sales - total_expenses
 
-        # Prepare the monthly data
         monthly_data.append({
-            "month": month_start_date.strftime("%b"),  # Month name (e.g., "Jan", "Feb")
+            "month": month_start_date.strftime("%b"),
             "total_sales": total_sales,
             "total_expenses": total_expenses,
             "profit": profit
         })
 
     return Response({"monthly_data": monthly_data}, status=200)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def pantry_items(request):
+    """
+    Return aggregated pantry items: list of {name, quantity}
+    """
+    receipts = Receipt.objects.filter(receipt_type='pantry')
+    items_map = {}
+    for r in receipts:
+        for it in (r.items or []):
+            if isinstance(it, dict):
+                name = (it.get('name') or it.get('item_name') or '').strip()
+                qty = it.get('quantity', it.get('qty', 1))
+            else:
+                name = str(it).strip()
+                qty = 1
+
+            if not name:
+                continue
+            try:
+                qty = int(qty)
+            except Exception:
+                try:
+                    qty = int(float(qty))
+                except Exception:
+                    qty = 0
+
+            items_map[name] = items_map.get(name, 0) + qty
+
+    items = [{"name": n, "quantity": q} for n, q in items_map.items()]
+    return Response({"items": items}, status=200)
+
+
+@extend_schema(
+    request={"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object"}}}},
+    responses={200: {"type": "object"}}
+)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def pantry_update(request):
+    """
+    Update ONLY qty for pantry inventory items.
+    - Payload: {"items":[{"name":"Milk","qty":2} ... ]}
+    - If an incoming item has qty <= 0 or "delete": true -> item is removed
+    - Optional query param: ?receipt_id=123 to target specific pantry receipt
+    """
+    items = request.data.get('items')
+    if not isinstance(items, list):
+        return Response({"error": "items must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+
+    incoming = {}
+    for it in items:
+        if not isinstance(it, dict):
+            return Response({"error": "each item must be an object with name and qty/quantity or delete flag"}, status=status.HTTP_400_BAD_REQUEST)
+        name = (it.get('name') or it.get('item_name') or '').strip()
+        if not name:
+            return Response({"error": "each item must include a name"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            qty = int(it.get('qty', it.get('quantity', 0)) or 0)
+        except Exception:
+            try:
+                qty = int(float(it.get('qty', it.get('quantity', 0))))
+            except Exception:
+                qty = 0
+        delete_flag = bool(it.get('delete', False)) or (qty <= 0)
+        incoming[name.lower()] = {"name": name, "qty": qty, "delete": delete_flag}
+    receipt_id = request.query_params.get('receipt_id')
+    if receipt_id:
+        try:
+            inventory = Receipt.objects.get(pk=int(receipt_id))
+        except Exception:
+            return Response({"error": f"Receipt id {receipt_id} not found"}, status=status.HTTP_404_NOT_FOUND)
+        if inventory.receipt_type != 'pantry':
+            return Response({"error": "Target receipt is not of type 'pantry'"}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        inventory = Receipt.objects.filter(receipt_type='pantry', shop_name='pantry_inventory').first()
+        if not inventory:
+            inventory = Receipt.objects.filter(receipt_type='pantry').order_by('-processed_at').first()
+
+    if not inventory:
+        normalized = []
+        for v in incoming.values():
+            if not v['delete']:
+                normalized.append({"name": v["name"], "qty": v["qty"], "quantity": v["qty"]})
+        if not normalized:
+            return Response({"items": [], "message": "nothing to create, all incoming items marked for deletion"}, status=status.HTTP_200_OK)
+        inventory = Receipt.objects.create(
+            date='',
+            time='',
+            shop_name='pantry_inventory',
+            address='',
+            payment_method='',
+            items=normalized,
+            services=[],
+            vat_percentage=0.0,
+            vat_amount=0.0,
+            subtotal=0.0,
+            tax=0.0,
+            discount=0.0,
+            quantity=sum(i['qty'] for i in normalized),
+            total_cost=0.0,
+            extracted_data={"source": "pantry_update_created"},
+            processed_at=datetime.now(),
+            receipt_type='pantry'
+        )
+        response_items = [{"name": it["name"], "quantity": int(it["qty"])} for it in normalized]
+        return Response({"items": response_items, "receipt_id": inventory.id}, status=status.HTTP_200_OK)
+
+    existing = {}
+    for it in (inventory.items or []):
+        if isinstance(it, dict):
+            n = (it.get('name') or it.get('item_name') or '').strip()
+            if not n:
+                continue
+            try:
+                current_qty = int(it.get('qty', it.get('quantity', 0)) or 0)
+            except Exception:
+                try:
+                    current_qty = int(float(it.get('qty', it.get('quantity', 0))))
+                except Exception:
+                    current_qty = 0
+            item_copy = dict(it)
+            item_copy['qty'] = current_qty
+            item_copy['quantity'] = current_qty
+            existing[n.lower()] = item_copy
+        else:
+            n = str(it).strip()
+            if n:
+                existing[n.lower()] = {"name": n, "qty": 1, "quantity": 1}
+
+    for key, inc in incoming.items():
+        if inc['delete']:
+            existing.pop(key, None)
+            continue
+        if key in existing:
+            existing[key]['qty'] = inc['qty']
+            existing[key]['quantity'] = inc['qty']
+        else:
+            existing[key] = {"name": inc['name'], "qty": inc['qty'], "quantity": inc['qty']}
+    updated_items = [v for v in existing.values()]
+    inventory.items = updated_items
+    inventory.quantity = sum(int(i.get('qty', i.get('quantity', 0)) or 0) for i in updated_items)
+    inventory.processed_at = datetime.now()
+    inventory.save(update_fields=['items', 'quantity', 'processed_at'])
+
+    response_items = [{"name": it.get('name') or it.get('item_name') or '', "quantity": int(it.get('qty', it.get('quantity', 0)) or 0)} for it in updated_items]
+    return Response({"items": response_items, "receipt_id": inventory.id}, status=status.HTTP_200_OK)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_pantry_item(request):
+    """
+    Permanently remove pantry items from ALL pantry receipts (receipt_type='pantry').
+    Accepts JSON body: {"name":"X"} or {"names":["A","B"]} or {"items":[{"name":"A"}]}
+    Returns list of removed names and receipts modified.
+    """
+    data = request.data or {}
+
+    names = data.get('names')
+    single = data.get('name')
+    items_list = data.get('items')
+
+    if isinstance(items_list, list):
+        extracted = []
+        for it in items_list:
+            if isinstance(it, dict):
+                n = (it.get('name') or it.get('item_name') or '').strip()
+                if n:
+                    extracted.append(n)
+            elif isinstance(it, str):
+                extracted.append(it.strip())
+        if extracted:
+            names = extracted
+
+    if isinstance(names, str) and ',' in names:
+        names = [n.strip() for n in names.split(',') if n.strip()]
+
+    if not names and single:
+        names = [single]
+
+    if not names:
+        return Response({"error": "Provide 'name' or 'names' or 'items' to delete"}, status=status.HTTP_400_BAD_REQUEST)
+
+    targets = [t.strip() for t in (names or []) if isinstance(t, str) and t.strip()]
+    if not targets:
+        return Response({"error": "No valid names provided"}, status=status.HTTP_400_BAD_REQUEST)
+    targets_lower = set(t.lower() for t in targets)
+
+    receipts = Receipt.objects.filter(receipt_type='pantry')
+    modified_receipts = []
+    removed_global = set()
+
+    for inventory in receipts:
+        kept = []
+        removed_local = []
+        for it in (inventory.items or []):
+            if isinstance(it, dict):
+                n = (it.get('name') or it.get('item_name') or '').strip()
+            else:
+                n = str(it).strip()
+            if not n:
+                continue
+            if n.lower() in targets_lower:
+                removed_local.append(n)
+                continue
+            kept.append(it)
+
+        if removed_local:
+            inventory.items = kept
+            inventory.quantity = sum(int(i.get('qty', i.get('quantity', 0)) or 0) if isinstance(i, dict) else 1 for i in kept)
+            inventory.processed_at = datetime.now()
+
+            inventory._skip_recalc = True
+            try:
+                inventory.save(update_fields=['items', 'quantity', 'processed_at'], skip_recalc=True)
+            except TypeError:
+                inventory.save(update_fields=['items', 'quantity', 'processed_at'])
+
+            modified_receipts.append(inventory.id)
+            for n in removed_local:
+                removed_global.add(n)
+
+    if not modified_receipts:
+        return Response({"error": "No matching item(s) found to delete"}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({
+        "removed": sorted(list(removed_global)),
+        "modified_receipts": modified_receipts
+    }, status=status.HTTP_200_OK)
+
 
