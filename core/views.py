@@ -1981,16 +1981,16 @@ def save_receipt_by_type(request, receipt_type):
             {"error": "Invalid receipt_type. Must be 'sales', 'expense', or 'pantry'"},
             status=400
         )
- 
+
     # Extract data from the request
     data = request.data
- 
+
     # Validate required fields
     required_fields = ["date", "time", "shop_name", "address", "payment_method", "items", "subtotal", "total_cost"]
     for field in required_fields:
         if field not in data:
             return JsonResponse({"error": f"Missing required field: {field}"}, status=400)
- 
+
     # Save the receipt data into the database
     receipt = Receipt.objects.create(
         date=data.get("date", ""),
@@ -2011,7 +2011,24 @@ def save_receipt_by_type(request, receipt_type):
         processed_at=datetime.now(),
         receipt_type=receipt_type  # Set the receipt_type from the URL
     )
- 
+
+    # If the receipt type is pantry, save or update the items in the Pantry model
+    if receipt_type == "pantry":
+        for item in data.get("items", []):
+            # Check if the item already exists in the Pantry table
+            existing_item = Pantry.objects.filter(name=item.get("name")).first()
+            
+            if existing_item:
+                # If the item exists, increase the quantity
+                existing_item.quantity += item.get("qty", 0)
+                existing_item.save()
+            else:
+                # If the item does not exist, create a new entry
+                Pantry.objects.create(
+                    name=item.get("name"),
+                    quantity=item.get("qty", 0)
+                )
+
     # Return a success message with the receipt ID
     return JsonResponse(
         {"message": f"{receipt_type.title()} receipt saved successfully", "receipt_id": receipt.id},

@@ -37,6 +37,7 @@ urlpatterns = [
     path('peptalk/', include('task.urls.peptalk_urls')),
     path('notifications/', include('notification.urls.notifications_urls')),
     path('contacts/', include('notification.urls.contacts_urls')),
+    path('pantry/', include('task.urls.pantry_urls')),
     # AI module
     path('core/', include('core.urls')),
 

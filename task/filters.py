@@ -40,3 +40,10 @@ class PeptalkFilter(filters.FilterSet):
     class Meta:
         model = PeptalkData
         fields = ['title', ]
+
+class PantryFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name="name", lookup_expr='icontains')
+
+    class Meta:
+        model = Pantry
+        fields = ['name', ]

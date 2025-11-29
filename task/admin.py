@@ -47,3 +47,7 @@ class QRTaskDataAdmin(admin.ModelAdmin):
 @admin.register(PeptalkData)
 class PeptalkDataAdmin(admin.ModelAdmin):
     list_display = [field.name for field in PeptalkData._meta.fields]
+
+@admin.register(Pantry)
+class PantryAdmin(admin.ModelAdmin):
+    list_display = [field.name for field in Pantry._meta.fields]

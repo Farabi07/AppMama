@@ -18,7 +18,11 @@ from commons.pagination import Pagination
 from django.utils import timezone
 import json 
 from datetime import timedelta
-
+from datetime import timedelta, datetime as _datetime
+try:
+    from dateutil.relativedelta import relativedelta
+except Exception:
+    relativedelta = None
 # Create your views here.
 
 @extend_schema(
@@ -30,29 +34,130 @@ from datetime import timedelta
 	request=TaskListSerializer,
 	responses=TaskListSerializer
 )
+
+
+# ...existing code...
+
+def _generate_future_dates(start_date, pattern, interval=1, count=1, until=None):
+    dates = []
+    current = start_date
+    i = 0
+    max_iter = 10000
+    while len(dates) < count and i < max_iter:
+        # Use a safe step: if client provided interval==0, advance by 1 to avoid infinite loops
+        step = interval if (isinstance(interval, int) and interval > 0) else 1
+        if pattern == 'daily':
+            current = current + timedelta(days=step)
+        elif pattern == 'weekly':
+            current = current + timedelta(weeks=step)
+        elif pattern == 'monthly':
+            if relativedelta is None:
+                # can't compute monthly without dateutil available
+                return dates
+            current = current + relativedelta(months=step)
+        else:
+            break
+
+        if until and current > until:
+            break
+
+        dates.append(current)
+        i += 1
+
+    return dates
+
+def _parse_recurrence(rp_raw):
+    if not rp_raw:
+        return None
+    try:
+        rp = json.loads(rp_raw)
+    except Exception:
+        return None
+    pattern = (rp.get('pattern') or '').lower()
+    try:
+        # accept 0 as a valid interval value (means client requested 'no gap' semantics)
+        interval = int(rp.get('interval', 0) or 0)
+    except Exception:
+        interval = 0
+    until = rp.get('until')
+    until_date = None
+    if until:
+        try:
+            # accept YYYY-MM-DD or ISO datetime
+            until_date = _datetime.fromisoformat(until).date()
+        except Exception:
+            try:
+                until_date = _datetime.strptime(until, "%Y-%m-%d").date()
+            except Exception:
+                until_date = None
+    return {"pattern": pattern, "interval": interval, "until": until_date}
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter("page"),
+        OpenApiParameter("size"),
+        OpenApiParameter("occurrences", type=int, description="Return N upcoming occurrences per task")
+  ],
+    request=TaskListSerializer,
+    responses=TaskListSerializer
+)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Ensures only authenticated users can access
+@permission_classes([IsAuthenticated])
 def getAllTask(request):
-    # Filter tasks created by the logged-in user (Farabi)
-    tasks = Task.objects.filter(created_by=request.user)
-    total_elements = tasks.count()
+    tasks_qs = Task.objects.filter(created_by=request.user)
+    total_elements = tasks_qs.count()
 
-    # Retrieve pagination parameters from query parameters
-    page = request.query_params.get('page', 1)  # Default to page 1 if not provided
-    size = request.query_params.get('size', 10)  # Default to 10 tasks per page if not provided
+    page = request.query_params.get('page', 1)
+    size = request.query_params.get('size', 10)
+    occurrences_count = int(request.query_params.get('occurrences', 0) or 0)
 
-    # Pagination logic
     pagination = Pagination()
     pagination.page = page
     pagination.size = size
-    tasks = pagination.paginate_data(tasks)
+    paginated_tasks = pagination.paginate_data(tasks_qs)
 
-    # Serialize the task data
-    serializer = TaskListSerializer(tasks, many=True)
+    serializer = TaskListSerializer(paginated_tasks, many=True)
+    serialized = serializer.data
 
-    # Prepare the response
+    today = timezone.now().date()
+    for idx, task_obj in enumerate(paginated_tasks):
+        # default values
+        serialized[idx]["next_occurrence"] = None
+        if task_obj.recurrence_pattern and task_obj.is_recurring:
+            rp = _parse_recurrence(task_obj.recurrence_pattern)
+            if rp and rp.get("pattern"):
+                # if scheduled_date itself is today or future, and within until => treat as next
+                sd = task_obj.scheduled_date
+                until = rp.get("until")
+                if sd >= today and (not until or sd <= until):
+                    serialized[idx]["next_occurrence"] = sd.isoformat()
+                    start_for_generation = sd
+                else:
+                    start_for_generation = sd
+                # generate next 1 (or N) occurrences after start_for_generation
+                cnt = max(1, occurrences_count) if occurrences_count else 1
+                future_dates = _generate_future_dates(start_for_generation, rp["pattern"], rp["interval"], count=cnt, until=until)
+                if future_dates:
+                    serialized[idx]["next_occurrence"] = future_dates[0].isoformat()
+                    if occurrences_count:
+                        serialized[idx]["upcoming_occurrences"] = [d.isoformat() for d in future_dates]
+                else:
+                    serialized[idx]["next_occurrence"] = None
+                    if occurrences_count:
+                        serialized[idx]["upcoming_occurrences"] = []
+        else:
+            # not recurring
+            serialized[idx]["recurrence"] = None
+
+        # also expose parsed recurrence for UI convenience
+        if task_obj.recurrence_pattern:
+            try:
+                serialized[idx]["recurrence"] = json.loads(task_obj.recurrence_pattern)
+            except Exception:
+                serialized[idx]["recurrence"] = task_obj.recurrence_pattern
+
     response = {
-        'tasks': serializer.data,
+        'tasks': serialized,
         'page': pagination.page,
         'size': pagination.size,
         'total_pages': pagination.total_pages,
@@ -278,7 +383,7 @@ def getAllHealthTask(request):
 
     return Response(response, status=status.HTTP_200_OK)
 
-@extend_schema( request={"type": "object", "properties": {"task_ids": {"type": "array", "items": {"type": "integer"}}, "recurrence": {"type":"object"}}}, responses={200: TaskListSerializer} ) 
+@extend_schema( request={"type": "object", "properties": {"task_ids": {"type": "array", "items": {"type": "integer"}}, "recurrence": {"type":"object", "properties": {"pattern":{"type":"string"}, "interval":{"type":"integer"}, "until":{"type":"string","format":"date"}}}}}, responses={200: TaskListSerializer} ) 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated]) 
 def setTasksRecurring(request):
@@ -294,15 +399,45 @@ def setTasksRecurring(request):
     if pattern and pattern not in ('daily', 'weekly', 'monthly'):
         return Response({"error": "recurrence.pattern must be one of: daily, weekly, monthly"}, status=status.HTTP_400_BAD_REQUEST)
 
+    # validate interval
+    try:
+        # allow 0 to mean "no gap" if the client intends that semantics
+        interval = int(recurrence.get('interval', 1) or 0)
+    except Exception:
+        interval = 0
+    if interval < 0:
+        return Response({"error": "recurrence.interval must be an integer >= 0"}, status=status.HTTP_400_BAD_REQUEST)
+    recurrence['interval'] = interval
+
+    # Optional 'until' end-date for recurrence. Accepts ISO date (YYYY-MM-DD) or ISO datetime.
+    until = recurrence.get('until')
+    if until:
+        from datetime import datetime, date
+        parsed_date = None
+        # try parsing common ISO formats
+        if isinstance(until, (date, datetime)):
+            parsed_date = until if isinstance(until, date) else until.date()
+        else:
+            if not isinstance(until, str):
+                return Response({"error": "recurrence.until must be a date string in YYYY-MM-DD or ISO format"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                # try full ISO datetime first
+                parsed_dt = datetime.fromisoformat(until)
+            except Exception:
+                try:
+                    parsed_dt = datetime.strptime(until, "%Y-%m-%d")
+                except Exception:
+                    return Response({"error": "recurrence.until must be a date string in YYYY-MM-DD or ISO format"}, status=status.HTTP_400_BAD_REQUEST)
+            parsed_date = parsed_dt.date()
+        # store normalized ISO date string
+        recurrence['until'] = parsed_date.isoformat()
+
     qs = Task.objects.filter(pk__in=task_ids, created_by=request.user)
     updated_count = 0
     for t in qs:
         t.is_recurring = True
-        # store recurrence as JSON string in recurrence_pattern (model field is CharField)
-        try:
-            t.recurrence_pattern = json.dumps(recurrence)
-        except Exception:
-            t.recurrence_pattern = str(recurrence)
+        # recurrence_pattern is a JSONField now — store dict directly
+        t.recurrence_pattern = recurrence
         t.save(update_fields=['is_recurring', 'recurrence_pattern', 'updated_at'])
         updated_count += 1
 

@@ -416,6 +416,8 @@ def pantry_items(request):
     Return aggregated pantry items: list of {name, quantity}
     """
     receipts = Receipt.objects.filter(receipt_type='pantry')
+    # only consider non-deleted pantry receipts
+    receipts = Receipt.objects.filter(receipt_type='pantry', is_deleted=False)
     items_map = {}
     for r in receipts:
         for it in (r.items or []):
@@ -450,15 +452,18 @@ def pantry_items(request):
 @permission_classes([IsAuthenticated])
 def pantry_update(request):
     """
-    Update ONLY qty for pantry inventory items.
+    Update ONLY qty for pantry inventory items across ALL pantry receipts.
     - Payload: {"items":[{"name":"Milk","qty":2} ... ]}
-    - If an incoming item has qty <= 0 or "delete": true -> item is removed
-    - Optional query param: ?receipt_id=123 to target specific pantry receipt
+    - If an incoming item has qty <= 0 or "delete": true -> item is removed from each pantry receipt
+    - This updates all receipts with receipt_type='pantry' (ignores receipt_id).
+    - Does NOT modify price fields (subtotal, total_cost, tax, vat, discount).
+    - Distributes incoming totals across all pantry receipts so aggregated totals equal incoming totals.
     """
     items = request.data.get('items')
     if not isinstance(items, list):
         return Response({"error": "items must be a list"}, status=status.HTTP_400_BAD_REQUEST)
 
+    # normalize incoming instructions
     incoming = {}
     for it in items:
         if not isinstance(it, dict):
@@ -475,20 +480,12 @@ def pantry_update(request):
                 qty = 0
         delete_flag = bool(it.get('delete', False)) or (qty <= 0)
         incoming[name.lower()] = {"name": name, "qty": qty, "delete": delete_flag}
-    receipt_id = request.query_params.get('receipt_id')
-    if receipt_id:
-        try:
-            inventory = Receipt.objects.get(pk=int(receipt_id))
-        except Exception:
-            return Response({"error": f"Receipt id {receipt_id} not found"}, status=status.HTTP_404_NOT_FOUND)
-        if inventory.receipt_type != 'pantry':
-            return Response({"error": "Target receipt is not of type 'pantry'"}, status=status.HTTP_400_BAD_REQUEST)
-    else:
-        inventory = Receipt.objects.filter(receipt_type='pantry', shop_name='pantry_inventory').first()
-        if not inventory:
-            inventory = Receipt.objects.filter(receipt_type='pantry').order_by('-processed_at').first()
 
-    if not inventory:
+    # Update ALL pantry receipts (ignore single receipt targeting)
+    receipts_qs = Receipt.objects.filter(receipt_type='pantry', is_deleted=False)
+
+    # If no pantry receipts exist, create one (only with item qtys — prices left default)
+    if not receipts_qs.exists():
         normalized = []
         for v in incoming.values():
             if not v['delete']:
@@ -515,47 +512,83 @@ def pantry_update(request):
             receipt_type='pantry'
         )
         response_items = [{"name": it["name"], "quantity": int(it["qty"])} for it in normalized]
-        return Response({"items": response_items, "receipt_id": inventory.id}, status=status.HTTP_200_OK)
+        return Response({"items": response_items, "receipt_ids": [inventory.id]}, status=status.HTTP_200_OK)
 
-    existing = {}
-    for it in (inventory.items or []):
-        if isinstance(it, dict):
-            n = (it.get('name') or it.get('item_name') or '').strip()
-            if not n:
-                continue
-            try:
-                current_qty = int(it.get('qty', it.get('quantity', 0)) or 0)
-            except Exception:
-                try:
-                    current_qty = int(float(it.get('qty', it.get('quantity', 0))))
-                except Exception:
-                    current_qty = 0
-            item_copy = dict(it)
-            item_copy['qty'] = current_qty
-            item_copy['quantity'] = current_qty
-            existing[n.lower()] = item_copy
-        else:
-            n = str(it).strip()
-            if n:
-                existing[n.lower()] = {"name": n, "qty": 1, "quantity": 1}
+    # DISTRIBUTE incoming totals across all pantry receipts so aggregated totals
+    # equal the incoming quantities (instead of setting same qty on every receipt).
+    receipts = list(receipts_qs)
+    n_receipts = len(receipts)
+    if n_receipts == 0:
+        return Response({"items": [], "modified_receipts": []}, status=status.HTTP_200_OK)
+
+    per_receipt_assignments = [dict() for _ in range(n_receipts)]
+    delete_names = set()
 
     for key, inc in incoming.items():
         if inc['delete']:
-            existing.pop(key, None)
+            delete_names.add(key)
             continue
-        if key in existing:
-            existing[key]['qty'] = inc['qty']
-            existing[key]['quantity'] = inc['qty']
-        else:
-            existing[key] = {"name": inc['name'], "qty": inc['qty'], "quantity": inc['qty']}
-    updated_items = [v for v in existing.values()]
-    inventory.items = updated_items
-    inventory.quantity = sum(int(i.get('qty', i.get('quantity', 0)) or 0) for i in updated_items)
-    inventory.processed_at = datetime.now()
-    inventory.save(update_fields=['items', 'quantity', 'processed_at'])
+        total = max(0, int(inc['qty'] or 0))
+        base = total // n_receipts
+        rem = total % n_receipts
+        for idx in range(n_receipts):
+            assigned = base + (1 if idx < rem else 0)
+            per_receipt_assignments[idx][key] = assigned
 
-    response_items = [{"name": it.get('name') or it.get('item_name') or '', "quantity": int(it.get('qty', it.get('quantity', 0)) or 0)} for it in updated_items]
-    return Response({"items": response_items, "receipt_id": inventory.id}, status=status.HTTP_200_OK)
+    modified_receipts = []
+    for idx, inventory in enumerate(receipts):
+        assignment = per_receipt_assignments[idx]
+        # build existing map
+        existing = {}
+        for it in (inventory.items or []):
+            if isinstance(it, dict):
+                n = (it.get('name') or it.get('item_name') or '').strip()
+                if not n:
+                    continue
+                try:
+                    current_qty = int(it.get('qty', it.get('quantity', 0)) or 0)
+                except Exception:
+                    try:
+                        current_qty = int(float(it.get('qty', it.get('quantity', 0))))
+                    except Exception:
+                        current_qty = 0
+                item_copy = dict(it)
+                item_copy['qty'] = current_qty
+                item_copy['quantity'] = current_qty
+                existing[n.lower()] = item_copy
+            else:
+                n = str(it).strip()
+                if n:
+                    existing[n.lower()] = {"name": n, "qty": 1, "quantity": 1}
+
+        # remove globals marked for deletion
+        for d in delete_names:
+            existing.pop(d, None)
+
+        # apply this receipt's assigned updates
+        for key, assigned_qty in assignment.items():
+            if assigned_qty <= 0:
+                existing.pop(key, None)
+                continue
+            if key in existing:
+                existing[key]['qty'] = assigned_qty
+                existing[key]['quantity'] = assigned_qty
+            else:
+                existing[key] = {"name": incoming[key]['name'], "qty": assigned_qty, "quantity": assigned_qty}
+
+        updated_items = [v for v in existing.values()]
+        inventory.items = updated_items
+        inventory.quantity = sum(int(i.get('qty', i.get('quantity', 0)) or 0) for i in updated_items)
+        inventory.processed_at = datetime.now()
+        inventory._skip_recalc = True
+        try:
+            inventory.save(update_fields=['items', 'quantity', 'processed_at'], skip_recalc=True)
+        except TypeError:
+            inventory.save(update_fields=['items', 'quantity', 'processed_at'])
+        modified_receipts.append(inventory.id)
+
+    response_items = [{"name": inc['name'], "quantity": int(inc['qty'])} for inc in incoming.values() if not inc['delete']]
+    return Response({"items": response_items, "modified_receipts": modified_receipts}, status=status.HTTP_200_OK)
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
