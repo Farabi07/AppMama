@@ -32,7 +32,7 @@ from django.utils import timezone
     responses=ReceiptListSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllReceipt(request):
     """

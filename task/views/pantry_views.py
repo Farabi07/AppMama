@@ -10,7 +10,8 @@ from task.filters import PantryFilter
 
 from drf_spectacular.utils import  extend_schema, OpenApiParameter
 from commons.pagination import Pagination
-
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import permission_classes
 
 
 
@@ -25,7 +26,7 @@ from commons.pagination import Pagination
 	responses=PantryMinimalSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllPantry(request):
     # Fetch all pantry items
@@ -68,7 +69,7 @@ def getAllPantry(request):
 	responses=PantrySerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllPantryWithoutPagination(request):
 	itemss = Pantry.objects.all()
@@ -167,6 +168,7 @@ def createPantry(request):
 
 @extend_schema(request=PantryMinimalSerializer, responses=PantryMinimalSerializer)
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated])
 def updatePantry(request):
     """
     Allows users to update quantities of multiple pantry items based on their name.
@@ -203,6 +205,7 @@ def updatePantry(request):
 
 @extend_schema(request=PantrySerializer, responses=PantrySerializer)
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def deletePantry(request, pk):
 	try:
 		items = Pantry.objects.get(pk=pk)
