@@ -18,29 +18,28 @@ from rest_framework.decorators import permission_classes
 # Create your views here.
 
 @extend_schema(
-	parameters=[
-		OpenApiParameter("page"),
-		OpenApiParameter("size"),
-  ],
-	request=PantryMinimalSerializer,
-	responses=PantryMinimalSerializer
+    parameters=[
+        OpenApiParameter("page"),
+        OpenApiParameter("size"),
+    ],
+    request=PantryMinimalSerializer,
+    responses=PantryMinimalSerializer
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllPantry(request):
-    # Fetch all pantry items
-    itemss = Pantry.objects.all()
+    # Fetch only this user's pantry items with quantity > 0
+    itemss = Pantry.objects.filter(quantity__gt=0, created_by=request.user)
     total_elements = itemss.count()
 
     # Get pagination parameters from query parameters
-    page = request.query_params.get('page', 1)  # Default to page 1 if not provided
-    size = request.query_params.get('size', 10)  # Default to size 10 if not provided
+    page = request.query_params.get('page', 1)
+    size = request.query_params.get('size', 10)
 
     # Pagination
     pagination = Pagination()
-    pagination.page = int(page)  # Ensure page is an integer
-    pagination.size = int(size)  # Ensure size is an integer
+    pagination.page = int(page)
+    pagination.size = int(size)
     itemss = pagination.paginate_data(itemss)
 
     # Serialize the data with only 'name' and 'quantity' fields

@@ -568,7 +568,6 @@ def save_task_from_ai_response(task_data, user):
     )
     
     return task
-
 def save_recipe_from_ai_response(recipe_data, task=None, user=None):
     """Save recipe data from AI response to database"""
     if not recipe_data:
@@ -576,17 +575,20 @@ def save_recipe_from_ai_response(recipe_data, task=None, user=None):
     
     saved_recipes = []
     
-    # Handle both field name variations
-    recipe_names = (recipe_data.get('recipe_name') or 
-                   recipe_data.get('recipy_name', []))
-    recipe_instructions = (recipe_data.get('recipe') or 
-                          recipe_data.get('recipy', []))
-    
+    # Accept both field name variations and both string/list types
+    recipe_names = recipe_data.get('recipe_name') or recipe_data.get('recipy_name') or []
+    recipe_instructions = recipe_data.get('recipe') or recipe_data.get('recipy') or []
+
+    # Convert to list if string
+    if isinstance(recipe_names, str):
+        recipe_names = [recipe_names]
+    if isinstance(recipe_instructions, str):
+        recipe_instructions = [recipe_instructions]
     if not isinstance(recipe_names, list):
         recipe_names = []
     if not isinstance(recipe_instructions, list):
         recipe_instructions = []
-    
+
     # Process up to 3 recipes
     max_recipes = min(len(recipe_names), len(recipe_instructions), 3)
     
@@ -614,7 +616,6 @@ def save_recipe_from_ai_response(recipe_data, task=None, user=None):
             logger.exception("Error saving recipe: %s", e)
     
     return saved_recipes
-
 
 # ==================== SEPARATED VIEWS FOR EACH INPUT TYPE ====================
 # Clean separation of views for task planning, task progress, recipe, peptalk and normal chat

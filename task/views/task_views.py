@@ -6,37 +6,27 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from drf_spectacular.utils import  extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from authentication.decorators import has_permissions
 from task.models import Task
-from task.serializers import TaskSerializer, TaskListSerializer,TaskMinimalListSerializer
+from task.serializers import TaskSerializer, TaskListSerializer, TaskMinimalListSerializer
 from task.filters import TaskFilter
 
 from commons.enums import PermissionEnum
 from commons.pagination import Pagination
 from django.utils import timezone
-import json 
-from datetime import timedelta
+import json
 from datetime import timedelta, datetime as _datetime
+
+# Import the helper function from task_helper.py
+from task.task_helper import _generate_and_create_occurrences
+
 try:
     from dateutil.relativedelta import relativedelta
 except Exception:
     relativedelta = None
-# Create your views here.
 
-@extend_schema(
-	parameters=[
-		OpenApiParameter("page"),
-		
-		OpenApiParameter("size"),
-  ],
-	request=TaskListSerializer,
-	responses=TaskListSerializer
-)
-
-
-# ...existing code...
 
 def _generate_future_dates(start_date, pattern, interval=1, count=1, until=None):
     dates = []
@@ -66,6 +56,7 @@ def _generate_future_dates(start_date, pattern, interval=1, count=1, until=None)
 
     return dates
 
+
 def _parse_recurrence(rp_raw):
     if not rp_raw:
         return None
@@ -92,12 +83,13 @@ def _parse_recurrence(rp_raw):
                 until_date = None
     return {"pattern": pattern, "interval": interval, "until": until_date}
 
+
 @extend_schema(
     parameters=[
         OpenApiParameter("page"),
         OpenApiParameter("size"),
         OpenApiParameter("occurrences", type=int, description="Return N upcoming occurrences per task")
-  ],
+    ],
     request=TaskListSerializer,
     responses=TaskListSerializer
 )
@@ -136,7 +128,8 @@ def getAllTask(request):
                     start_for_generation = sd
                 # generate next 1 (or N) occurrences after start_for_generation
                 cnt = max(1, occurrences_count) if occurrences_count else 1
-                future_dates = _generate_future_dates(start_for_generation, rp["pattern"], rp["interval"], count=cnt, until=until)
+                future_dates = _generate_future_dates(start_for_generation, rp["pattern"], rp["interval"], count=cnt,
+                                                      until=until)
                 if future_dates:
                     serialized[idx]["next_occurrence"] = future_dates[0].isoformat()
                     if occurrences_count:
@@ -167,86 +160,70 @@ def getAllTask(request):
     return Response(response, status=status.HTTP_200_OK)
 
 
-
 @extend_schema(
-	parameters=[
-		OpenApiParameter("page"),
-		OpenApiParameter("size"),
-  ],
-	request=TaskSerializer,
-	responses=TaskSerializer
+    parameters=[
+        OpenApiParameter("page"),
+        OpenApiParameter("size"),
+    ],
+    request=TaskSerializer,
+    responses=TaskSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllTaskWithoutPagination(request):
-	tasks = Task.objects.all()
-
-	serializer = TaskListSerializer(tasks, many=True)
-
-	return Response({'tasks': serializer.data}, status=status.HTTP_200_OK)
-
-
+    tasks = Task.objects.all()
+    serializer = TaskListSerializer(tasks, many=True)
+    return Response({'tasks': serializer.data}, status=status.HTTP_200_OK)
 
 
 @extend_schema(request=TaskSerializer, responses=TaskSerializer)
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_DETAILS_VIEW.name])
 def getATask(request, pk):
-	try:
-		tasks = Task.objects.get(pk=pk)
-		serializer = TaskSerializer(tasks)
-		return Response(serializer.data, status=status.HTTP_200_OK)
-	except ObjectDoesNotExist:
-		return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
-
-
+    try:
+        tasks = Task.objects.get(pk=pk)
+        serializer = TaskSerializer(tasks)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except ObjectDoesNotExist:
+        return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(request=TaskSerializer, responses=TaskSerializer)
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_DETAILS_VIEW.name])
 def searchTask(request):
-	tasks = TaskFilter(request.GET, queryset=Task.objects.all())
-	tasks = tasks.qs
+    tasks = TaskFilter(request.GET, queryset=Task.objects.all())
+    tasks = tasks.qs
 
-	print('searched_products: ', tasks)
+    print('searched_products: ', tasks)
 
-	total_elements = tasks.count()
+    total_elements = tasks.count()
 
-	page = request.query_params.get('page')
-	size = request.query_params.get('size')
+    page = request.query_params.get('page')
+    size = request.query_params.get('size')
 
-	# Pagination
-	pagination = Pagination()
-	pagination.page = page
-	pagination.size = size
-	tasks = pagination.paginate_data(tasks)
+    # Pagination
+    pagination = Pagination()
+    pagination.page = page
+    pagination.size = size
+    tasks = pagination.paginate_data(tasks)
 
-	serializer = TaskListSerializer(tasks, many=True)
+    serializer = TaskListSerializer(tasks, many=True)
 
-	response = {
-		'tasks': serializer.data,
-		'page': pagination.page,
-		'size': pagination.size,
-		'total_pages': pagination.total_pages,
-		'total_elements': total_elements,
-	}
+    response = {
+        'tasks': serializer.data,
+        'page': pagination.page,
+        'size': pagination.size,
+        'total_pages': pagination.total_pages,
+        'total_elements': total_elements,
+    }
 
-	if len(tasks) > 0:
-		return Response(response, status=status.HTTP_200_OK)
-	else:
-		return Response({'detail': f"There are no tasks matching your search"}, status=status.HTTP_400_BAD_REQUEST)
-
-
+    if len(tasks) > 0:
+        return Response(response, status=status.HTTP_200_OK)
+    else:
+        return Response({'detail': f"There are no tasks matching your search"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(request=TaskSerializer, responses=TaskSerializer)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_CREATE.name])
 def createTask(request):
     data = request.data
     filtered_data = {}
@@ -268,39 +245,34 @@ def createTask(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-
-
 @extend_schema(request=TaskSerializer, responses=TaskSerializer)
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_UPDATE.name, PermissionEnum.PERMISSION_PARTIAL_UPDATE.name])
-def updateTask(request,pk):
-	try:
-		tasks = Task.objects.get(pk=pk)
-		data = request.data
-		serializer = TaskSerializer(tasks, data=data)
-		if serializer.is_valid():
-			serializer.save()
-			return Response(serializer.data, status=status.HTTP_200_OK)
-		else:
-			return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-	except ObjectDoesNotExist:
-		return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
-
-
+def updateTask(request, pk):
+    try:
+        tasks = Task.objects.get(pk=pk)
+        data = request.data
+        serializer = TaskSerializer(tasks, data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except ObjectDoesNotExist:
+        return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(request=TaskListSerializer, responses=TaskListSerializer)
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_DELETE.name])
 def deleteTask(request, pk):
-	try:
-		tasks = Task.objects.get(pk=pk)
-		tasks.delete()
-		return Response({'detail': f'Task id - {pk} is deleted successfully'}, status=status.HTTP_200_OK)
-	except ObjectDoesNotExist:
-		return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        tasks = Task.objects.get(pk=pk)
+        tasks.delete()
+        return Response({'detail': f'Task id - {pk} is deleted successfully'}, status=status.HTTP_200_OK)
+    except ObjectDoesNotExist:
+        return Response({'detail': f"Task id - {pk} doesn't exists"}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     parameters=[
@@ -312,12 +284,11 @@ def deleteTask(request, pk):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-# @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getTodayTask(request):
     today = timezone.now().date()
     print("Today's date:", today)
 
-    # ✅ filter tasks by logged-in user
+    # Filter tasks by logged-in user
     tasks = Task.objects.filter(scheduled_date=today, created_by=request.user)
 
     total_elements = tasks.count()
@@ -343,6 +314,7 @@ def getTodayTask(request):
 
     return Response(response, status=status.HTTP_200_OK)
 
+
 @extend_schema(
     parameters=[
         OpenApiParameter("page"),
@@ -352,9 +324,8 @@ def getTodayTask(request):
     responses=TaskListSerializer
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  
-def getAllHealthTask(request): 
-    
+@permission_classes([IsAuthenticated])
+def getAllHealthTask(request):
     tasks = Task.objects.filter(created_by=request.user, task_category="health task")
 
     total_elements = tasks.count()
@@ -383,63 +354,113 @@ def getAllHealthTask(request):
 
     return Response(response, status=status.HTTP_200_OK)
 
-@extend_schema( request={"type": "object", "properties": {"task_ids": {"type": "array", "items": {"type": "integer"}}, "recurrence": {"type":"object", "properties": {"pattern":{"type":"string"}, "interval":{"type":"integer"}, "until":{"type":"string","format":"date"}}}}}, responses={200: TaskListSerializer} ) 
+
+@extend_schema(
+    request={
+        "type": "object",
+        "properties": {
+            "task_ids": {
+                "type": "array",
+                "items": {"type": "integer"}
+            },
+            "recurrence": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "description": "Repeat pattern"
+                    },
+                    "selected_dates": {
+                        "type": "array",
+                        "items": {"type": "string", "format": "date"},
+                        "description": "Optional: User-selected specific dates for repetition (YYYY-MM-DD format). If provided, tasks will be created only on these dates."
+                    }
+                },
+                "required": ["pattern"]
+            }
+        },
+        "required": ["task_ids", "recurrence"]
+    },
+    responses={200: TaskListSerializer}
+)
 @api_view(['POST'])
-@permission_classes([IsAuthenticated]) 
+@permission_classes([IsAuthenticated])
 def setTasksRecurring(request):
-    """ Mark selected tasks as recurring. Body example: { "task_ids": [1,2,3], "recurrence": {"pattern":"daily"|"weekly"|"monthly", "interval":1} } Only tasks owned by request.user (created_by) will be updated. """
+    """
+    Mark selected tasks as recurring and create repeated instances.
+    
+    Rules:
+    - Daily: User can select any days from task date to end of month
+    - Weekly: User can select any Sundays (if task is on Sunday) from task date to end of month
+    - Monthly: User can select any 6th (if task is on 6th) from task month to end of year
+    
+    Example request body:
+    
+    Auto-generate dates:
+    {
+        "task_ids": [1, 2, 3],
+        "recurrence": {
+            "pattern": "daily"  // will auto-generate all days till end of month
+        }
+    }
+    
+    User selects specific dates:
+    {
+        "task_ids": [1],
+        "recurrence": {
+            "pattern": "daily",
+            "selected_dates": ["2024-06-10", "2024-06-15", "2024-06-20", "2024-06-25"]
+        }
+    }
+    """
     data = request.data or {}
     task_ids = data.get('task_ids') or []
     recurrence = data.get('recurrence') or {}
 
+    # Validation
     if not isinstance(task_ids, list) or not task_ids:
-        return Response({"error": "task_ids must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "task_ids must be a non-empty list"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     pattern = (recurrence.get('pattern') or '').lower()
-    if pattern and pattern not in ('daily', 'weekly', 'monthly'):
-        return Response({"error": "recurrence.pattern must be one of: daily, weekly, monthly"}, status=status.HTTP_400_BAD_REQUEST)
+    if not pattern or pattern not in ('daily', 'weekly', 'monthly'):
+        return Response(
+            {"error": "recurrence.pattern is required and must be one of: daily, weekly, monthly"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # validate interval
-    try:
-        # allow 0 to mean "no gap" if the client intends that semantics
-        interval = int(recurrence.get('interval', 1) or 0)
-    except Exception:
-        interval = 0
-    if interval < 0:
-        return Response({"error": "recurrence.interval must be an integer >= 0"}, status=status.HTTP_400_BAD_REQUEST)
-    recurrence['interval'] = interval
-
-    # Optional 'until' end-date for recurrence. Accepts ISO date (YYYY-MM-DD) or ISO datetime.
-    until = recurrence.get('until')
-    if until:
-        from datetime import datetime, date
-        parsed_date = None
-        # try parsing common ISO formats
-        if isinstance(until, (date, datetime)):
-            parsed_date = until if isinstance(until, date) else until.date()
-        else:
-            if not isinstance(until, str):
-                return Response({"error": "recurrence.until must be a date string in YYYY-MM-DD or ISO format"}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                # try full ISO datetime first
-                parsed_dt = datetime.fromisoformat(until)
-            except Exception:
-                try:
-                    parsed_dt = datetime.strptime(until, "%Y-%m-%d")
-                except Exception:
-                    return Response({"error": "recurrence.until must be a date string in YYYY-MM-DD or ISO format"}, status=status.HTTP_400_BAD_REQUEST)
-            parsed_date = parsed_dt.date()
-        # store normalized ISO date string
-        recurrence['until'] = parsed_date.isoformat()
-
+    # Get tasks owned by current user
     qs = Task.objects.filter(pk__in=task_ids, created_by=request.user)
+
+    if not qs.exists():
+        return Response(
+            {"error": "No tasks found with the provided IDs for this user"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
     updated_count = 0
-    for t in qs:
-        t.is_recurring = True
-        # recurrence_pattern is a JSONField now — store dict directly
-        t.recurrence_pattern = recurrence
-        t.save(update_fields=['is_recurring', 'recurrence_pattern', 'updated_at'])
+    created_count = 0
+
+    for task in qs:
+        # Mark task as recurring
+        task.is_recurring = True
+        task.recurrence_pattern = recurrence
+        task.save(update_fields=['is_recurring', 'recurrence_pattern', 'updated_at'])
+
+        # Create repeated task occurrences using the imported helper function
+        created_ids = _generate_and_create_occurrences(task, recurrence)
+        created_count += len(created_ids)
         updated_count += 1
 
     serializer = TaskListSerializer(qs, many=True)
-    return Response({"updated_count": updated_count, "tasks": serializer.data}, status=status.HTTP_200_OK)
+
+    return Response({
+        "success": True,
+        "message": f"Successfully set {updated_count} task(s) as recurring",
+        "updated_count": updated_count,
+        "created_occurrences": created_count,
+        "tasks": serializer.data
+    }, status=status.HTTP_200_OK)

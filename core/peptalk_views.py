@@ -189,30 +189,40 @@ def api_peptalk(request):
     if token: headers['Authorization']=f'Bearer {token}'
 
     try:
-        r=requests.get(PEPTALK_SETTINGS_URL, headers=headers, timeout=6)
-        url=None
-        if r.status_code==200:
-            data=r.json(); groups=[]
-            if isinstance(data,dict):
-                for k in ('peptalks','cities','results'):
-                    if isinstance(data.get(k), list): groups=data[k]
-                if not groups:
-                    for v in data.values():
-                        if isinstance(v,list): groups=v; break
-            for g in groups:
-                title=(g.get('title') or g.get('name') or '').lower()
-                if emotion and emotion in title:
-                    items=g.get('items') or g.get('voices') or g.get('children') or []
-                    for it in items:
-                        v = it.get('voice') if isinstance(it,dict) else str(it)
-                        if v:
-                            import os
-                            url=f"/media/voices/{os.path.basename(v)}"; break
-                if url: break
+        r = requests.get(PEPTALK_SETTINGS_URL, headers=headers, timeout=6)
+        url = None
+        if r.status_code == 200:
+            data = r.json()
+            # Handle flat list (like "cities": [...])
+            flat = []
+            if isinstance(data, dict):
+                for k in ('peptalks', 'cities', 'results'):
+                    if isinstance(data.get(k), list):
+                        flat = data[k]
+                        break
+                if not flat and isinstance(data.get('data'), list):
+                    flat = data['data']
+            # Group by title
+            group_map = {}
+            for item in flat:
+                title = (item.get('title') or item.get('name') or '').lower()
+                voice = item.get('voice')
+                if title and voice:
+                    group_map.setdefault(title, []).append(voice)
+            # Try to match emotion
+            key = (emotion or 'emotion3').lower()
+            if key in group_map and group_map[key]:
+                url = group_map[key][0]  # or random.choice(group_map[key])
+            # Fallback: pick any voice
+            if not url and group_map:
+                for voices in group_map.values():
+                    if voices:
+                        url = voices[0]
+                        break
         if not url:
-            url='/media/voices/default.mp3'
+            url = '/media/voices/default.mp3'
     except Exception:
-        url='/media/voices/default.mp3'
+        url = '/media/voices/default.mp3'
 
     # Build emotion-specific responses & motivational messages
     msgs = {

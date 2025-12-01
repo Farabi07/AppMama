@@ -4,7 +4,7 @@ from task.views import peptalk_views as views
 
 
 urlpatterns = [
-	path('api/v1/peptalk/all/', views.getAllPeptalk),
+	path('api/v1/peptalk/all/', views.getAllPeptalkWithoutPagination),
 
 	path('api/v1/peptalk/without_pagination/all/', views.getAllPeptalkWithoutPagination),
 

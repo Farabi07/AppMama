@@ -32,7 +32,7 @@ from commons.pagination import Pagination
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllRecipe(request):
-	recipes = Recipe.objects.all().order_by('-created_at')
+	recipes = Recipe.objects.filter(created_by=request.user).order_by('-created_at')
 	total_elements = recipes.count()
 
 	page = request.query_params.get('page')
