@@ -1,3 +1,4 @@
+import random
 from urllib import response
 import os, re, json, base64, uuid, requests
 from django.conf import settings
@@ -137,6 +138,45 @@ def _emotions(text: str):
         "confidence": 0.85 if any([emo1, emo2, emo3, emo4]) else 0.1
     }
 
+
+def _ai_emotion_detection(text: str):
+    """Use AI to detect emotion when keywords don't match"""
+    try:
+        prompt = f"""Analyze this text and determine which emotion category it belongs to:
+
+Text: "{text}"
+
+Emotion Categories:
+1. emotion1: Guilty, behind schedule, self-critical, pressured, failing, inadequate, disappointing
+2. emotion2: Sad, insecure, unworthy, alone, lonely, grief, loss, heartbroken, depressed, rejected
+3. emotion3: Happy, grateful, blessed, joyful, excited, proud, accomplished, content, positive
+4. emotion4: Tired, stressed, overwhelmed, frustrated, exhausted, burned out, anxious, angry
+
+Respond with ONLY the emotion category name (emotion1, emotion2, emotion3, or emotion4) that best matches the text."""
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an emotion detection assistant. Respond only with the emotion category name."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=10,
+            temperature=0.3
+        )
+        
+        ai_emotion = response.choices[0].message.content.strip().lower()
+        
+        # Validate the response
+        if ai_emotion in ['emotion1', 'emotion2', 'emotion3', 'emotion4']:
+            return ai_emotion
+        else:
+            return 'emotion3'  # Default fallback
+            
+    except Exception as e:
+        print(f"AI emotion detection error: {e}")
+        return 'emotion3'  # Default fallback
+
+
 # TTS helper
 
 def _tts(text: str):
@@ -180,7 +220,12 @@ def api_peptalk(request):
     # detect primary emotion if needed
     if not emotion and user_input:
         detected=_emotions(user_input)
-        emotion=detected.get('primary_emotion','emotion3')
+        
+        # If confidence is low (no keywords matched), use AI detection
+        if detected.get('confidence', 0) < 0.5:
+            emotion = _ai_emotion_detection(user_input)
+        else:
+            emotion = detected.get('primary_emotion','emotion3')
 
     # fetch from peptalk API
     auth=request.META.get('HTTP_AUTHORIZATION','')
@@ -212,7 +257,7 @@ def api_peptalk(request):
             # Try to match emotion
             key = (emotion or 'emotion3').lower()
             if key in group_map and group_map[key]:
-                url = group_map[key][0]  # or random.choice(group_map[key])
+                url = random.choice(group_map[key])
             # Fallback: pick any voice
             if not url and group_map:
                 for voices in group_map.values():

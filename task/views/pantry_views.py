@@ -71,11 +71,11 @@ def getAllPantry(request):
 @permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllPantryWithoutPagination(request):
-	itemss = Pantry.objects.all()
+    itemss = Pantry.objects.filter(quantity__gt=0, created_by=request.user)
 
-	serializer = PantryListSerializer(itemss, many=True)
+    serializer = PantryListSerializer(itemss, many=True)
 
-	return Response({'itemss': serializer.data}, status=status.HTTP_200_OK)
+    return Response({'itemss': serializer.data}, status=status.HTTP_200_OK)
 
 
 

@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.models import Group
+
+from core.models import Note
 from .models import *
 
 # Register TaskCategory model
@@ -51,3 +53,7 @@ class PeptalkDataAdmin(admin.ModelAdmin):
 @admin.register(Pantry)
 class PantryAdmin(admin.ModelAdmin):
     list_display = [field.name for field in Pantry._meta.fields]
+
+@admin.register(Note)
+class NoteAdmin(admin.ModelAdmin):
+	list_display = [field.name for field in Note._meta.fields]

@@ -548,7 +548,10 @@ class Subscription(models.Model):
     def can_use_app(self):
         """
         Check if the user can use the app based on either the trial or subscription being active.
+        Superusers always have access without trial or subscription.
         """
+        if self.user.is_superuser:
+            return True
         return self.is_trial_active() or self.is_subscription_active()
     def sync_status(self):
         """Update the stored status_is field to match the calculated status."""
@@ -561,7 +564,10 @@ class Subscription(models.Model):
     def status(self):
         """
         Return the subscription status: trial_active, subscription_active, or expired.
+        Superusers always have 'subscription_active' status.
         """
+        if self.user.is_superuser:
+            return "subscription_active"
         if self.is_subscription_active():
             return "subscription_active"
         elif self.is_trial_active():

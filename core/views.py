@@ -1968,7 +1968,21 @@ def receipt_preview(request):
     # ✅ Return preview only (not saved in DB yet)
     return JsonResponse(structured_data, safe=False, status=200)
  
- 
+def parse_flexible_date(raw_date):
+    """
+    Accepts 'YYYY-MM-DD', 'MM.DD.YYYY', or 'MM/DD/YYYY' and returns 'MM/DD/YYYY'.
+    Returns '' if parsing fails.
+    """
+    from datetime import datetime
+    if not raw_date or not isinstance(raw_date, str):
+        return ''
+    for fmt in ("%Y-%m-%d", "%m.%d.%Y", "%m/%d/%Y"):
+        try:
+            dt = datetime.strptime(raw_date, fmt)
+            return dt.strftime("%m/%d/%Y")
+        except Exception:
+            continue
+    return ''
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
 @csrf_exempt
@@ -1985,6 +1999,8 @@ def save_receipt_by_type(request, receipt_type):
 
     # Extract data from the request
     data = request.data
+    raw_date = data.get("date", "")
+    normalized_date = parse_flexible_date(raw_date)
 
     # Validate required fields
     required_fields = ["date", "time", "shop_name", "address", "payment_method", "items", "subtotal", "total_cost"]
@@ -1994,7 +2010,7 @@ def save_receipt_by_type(request, receipt_type):
 
     # Save the receipt data into the database
     receipt = Receipt.objects.create(
-        date=data.get("date", ""),
+        date=normalized_date,
         time=data.get("time", ""),
         shop_name=data.get("shop_name", ""),
         address=data.get("address", ""),
@@ -2010,14 +2026,15 @@ def save_receipt_by_type(request, receipt_type):
         total_cost=data.get("total_cost", 0.0),
         extracted_data=data,
         processed_at=datetime.now(),
-        receipt_type=receipt_type  # Set the receipt_type from the URL
+        receipt_type=receipt_type,
+        created_by=request.user
     )
 
     # If the receipt type is pantry, save or update the items in the Pantry model
     if receipt_type == "pantry":
         for item in data.get("items", []):
             # Check if the item already exists in the Pantry table
-            existing_item = Pantry.objects.filter(name=item.get("name")).first()
+            existing_item = Pantry.objects.filter(name=item.get("name"), created_by=request.user).first()
             
             if existing_item:
                 # If the item exists, increase the quantity
@@ -2027,7 +2044,8 @@ def save_receipt_by_type(request, receipt_type):
                 # If the item does not exist, create a new entry
                 Pantry.objects.create(
                     name=item.get("name"),
-                    quantity=item.get("qty", 0)
+                    quantity=item.get("qty", 0),
+                    created_by=request.user
                 )
 
     # Return a success message with the receipt ID

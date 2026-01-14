@@ -38,6 +38,7 @@ urlpatterns = [
     path('notifications/', include('notification.urls.notifications_urls')),
     path('contacts/', include('notification.urls.contacts_urls')),
     path('pantry/', include('task.urls.pantry_urls')),
+    path('note/', include('task.urls.note_urls')),
     # AI module
     path('core/', include('core.urls')),
 

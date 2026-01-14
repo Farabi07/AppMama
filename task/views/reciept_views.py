@@ -39,7 +39,7 @@ def getAllReceipt(request):
     Fetch all non-deleted receipts with pagination
     """
     # Filter out soft-deleted receipts
-    receipts = Receipt.objects.filter(is_deleted=False)
+    receipts = Receipt.objects.filter(is_deleted=False, created_by=request.user)
     total_elements = receipts.count()
 
     page = request.query_params.get('page')
@@ -79,7 +79,7 @@ def getAllReceipt(request):
 	responses=ReceiptSerializer
 )
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 # @has_permissions([PermissionEnum.PERMISSION_LIST_VIEW.name])
 def getAllReceiptWithoutPagination(request):
 	reciept = Receipt.objects.all()
@@ -270,7 +270,7 @@ def listReceipts(request):
     page = int(request.GET.get("page", 1))
     page_size = int(request.GET.get("size", 10))
 
-    base_qs = Receipt.objects.filter(is_deleted=False)
+    base_qs = Receipt.objects.filter(is_deleted=False, created_by=request.user)
 
     if receipt_type:
         if receipt_type not in ["expense", "sales", "pantry"]:
@@ -303,6 +303,7 @@ def listReceipts(request):
     return Response(response, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])  
 def monthly_report(request):
     current_date = datetime.now()
     month_start = current_date.replace(day=1)
@@ -312,26 +313,31 @@ def monthly_report(request):
     last_month_start = (month_start - timedelta(days=1)).replace(day=1)
     last_month_end = month_start - timedelta(days=1)
 
+    # Filter by current user
     sales_receipts = Receipt.objects.filter(
-        date__gte=month_start.strftime('%m/%d/%Y'), 
-        date__lte=month_end.strftime('%m/%d/%Y'), 
-        receipt_type='sales'
+        date__gte=month_start.strftime('%d/%m/%Y'), 
+        date__lte=month_end.strftime('%d/%m/%Y'), 
+        receipt_type='sales',
+        created_by=request.user
     )
     expense_receipts = Receipt.objects.filter(
-        date__gte=month_start.strftime('%m/%d/%Y'), 
-        date__lte=month_end.strftime('%m/%d/%Y'), 
-        receipt_type='expense'
+        date__gte=month_start.strftime('%d/%m/%Y'), 
+        date__lte=month_end.strftime('%d/%m/%Y'), 
+        receipt_type='expense',
+        created_by=request.user
     )
 
     last_month_sales_receipts = Receipt.objects.filter(
-        date__gte=last_month_start.strftime('%m/%d/%Y'), 
-        date__lte=last_month_end.strftime('%m/%d/%Y'), 
-        receipt_type='sales'
+        date__gte=last_month_start.strftime('%d/%m/%Y'), 
+        date__lte=last_month_end.strftime('%d/%m/%Y'), 
+        receipt_type='sales',
+        created_by=request.user
     )
     last_month_expense_receipts = Receipt.objects.filter(
-        date__gte=last_month_start.strftime('%m/%d/%Y'), 
-        date__lte=last_month_end.strftime('%m/%d/%Y'), 
-        receipt_type='expense'
+        date__gte=last_month_start.strftime('%d/%m/%Y'), 
+        date__lte=last_month_end.strftime('%d/%m/%Y'), 
+        receipt_type='expense',
+        created_by=request.user
     )
 
     total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
@@ -370,14 +376,11 @@ def monthly_report(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])  
 def monthly_statistics(request):
     current_date = datetime.now()
     month_start = current_date.replace(day=1)
-
-    last_month_start = (month_start - timedelta(days=1)).replace(day=1)
-
     months_back = 6  
-
     monthly_data = []
 
     for month_offset in range(months_back):
@@ -385,15 +388,18 @@ def monthly_statistics(request):
         next_month = month_start_date.replace(day=28) + timedelta(days=4)
         month_end_date = next_month - timedelta(days=next_month.day)
 
+        # Filter by current user
         sales_receipts = Receipt.objects.filter(
-            date__gte=month_start_date.strftime('%m/%d/%Y'),
-            date__lte=month_end_date.strftime('%m/%d/%Y'),
-            receipt_type='sales'
+            date__gte=month_start_date.strftime('%d/%m/%Y'),
+            date__lte=month_end_date.strftime('%d/%m/%Y'),
+            receipt_type='sales',
+            created_by=request.user
         )
         expense_receipts = Receipt.objects.filter(
-            date__gte=month_start_date.strftime('%m/%d/%Y'),
-            date__lte=month_end_date.strftime('%m/%d/%Y'),
-            receipt_type='expense'
+            date__gte=month_start_date.strftime('%d/%m/%Y'),
+            date__lte=month_end_date.strftime('%d/%m/%Y'),
+            receipt_type='expense',
+            created_by=request.user
         )
 
         total_sales = sales_receipts.aggregate(Sum('total_cost'))['total_cost__sum'] or 0
