@@ -40,6 +40,7 @@ from rest_framework.permissions import IsAuthenticated
 from task.models import Task, Recipe
 from django.utils import timezone
 from google.cloud import texttospeech
+import random
 
 # Import all functions from asif_ai.py
 from core.asif_ai import (
@@ -616,6 +617,212 @@ def save_recipe_from_ai_response(recipe_data, task=None, user=None):
             logger.exception("Error saving recipe: %s", e)
     
     return saved_recipes
+
+
+# ============================
+# DECISION / UNLOAD APIs
+# ============================
+def _is_question(text: str):
+    """Detect if text is a question/decision that needs to be stored"""
+    if not text:
+        return False
+    t = text.strip().lower()
+    if t.endswith('?'):
+        return True
+    question_starters = [
+        'what ', 'should i ', 'should we ', 'which ', 'how ', 'when ', 'where ',
+        'can i ', 'could i ', 'would i ', 'do i ', 'does ', 'is it ', 'am i '
+    ]
+    if any(t.startswith(starter) for starter in question_starters):
+        return True
+    return False
+
+
+def _get_relief_confirmation():
+    """Get a random relief-focused confirmation message"""
+    confirmations = [
+        "Saved. You don't have to decide now.",
+        "Held. You can come back later.",
+        "You don't need to solve this tonight.",
+        "It's safe here until you're ready.",
+        "You don't have to hold this in your head.",
+        "Saved for later.",
+        "Done. It's off your mind.",
+        "Closed. One less thing.",
+        "You don't have to hold this anymore.",
+        "Handled. You can rest.",
+        "That's lighter."
+    ]
+    return random.choice(confirmations)
+
+
+def _tts(text: str):
+    """Generate TTS audio and return a media URL (or None)."""
+    try:
+        return synthesize_speech_neural2_female_base64(text)
+    except Exception:
+        return None
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([JSONParser])
+def api_unload_decision(request):
+    """Store questions/decisions for mental unload"""
+    from .models import Decision
+
+    body = request.data or {}
+    user_input = (body.get('text') or body.get('user_input') or '').strip()
+    mode = (body.get('mode') or '').strip().lower()
+
+    if not user_input:
+        return JsonResponse({'error': 'No text provided'}, status=400)
+
+    is_question = _is_question(user_input)
+
+    decision = Decision.objects.create(
+        user=request.user,
+        mode=mode if mode else 'general',
+        text=user_input,
+        status='open'
+    )
+
+    relief_msg = _get_relief_confirmation()
+
+    response = {
+        "message": relief_msg,
+        "is_question": is_question,
+        "stored": True,
+        "id": decision.id
+    }
+
+    audio = _tts(relief_msg)
+    if audio:
+        response['audio_url'] = audio
+
+    return JsonResponse(response, status=200)
+
+
+@csrf_exempt
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def api_get_decisions(request):
+    """Return list of decisions for the authenticated user."""
+    from .models import Decision
+
+    status = request.GET.get('status')  # optional: open/resolved
+    mode = request.GET.get('mode')
+
+    qs = Decision.objects.filter(user=request.user)
+    if status:
+        qs = qs.filter(status=status)
+    if mode:
+        qs = qs.filter(mode=mode)
+
+    data = []
+    for d in qs.order_by('-created_at')[:200]:
+        data.append({
+            'id': d.id,
+            'text': d.text,
+            'mode': d.mode,
+            'status': d.status,
+            'created_at': d.created_at.isoformat(),
+        })
+
+    return JsonResponse({'decisions': data}, status=200)
+
+
+@csrf_exempt
+@api_view(['PATCH','DELETE'])
+@permission_classes([IsAuthenticated])
+@parser_classes([JSONParser])
+def api_update_decision(request, decision_id):
+    """Update (mark resolved/open) or delete a Decision."""
+    from .models import Decision
+
+    try:
+        decision = Decision.objects.get(id=decision_id, user=request.user)
+    except Decision.DoesNotExist:
+        return JsonResponse({'error': 'Not found'}, status=404)
+
+    if request.method == 'DELETE':
+        decision.delete()
+        return JsonResponse({'deleted': True}, status=200)
+
+    # PATCH
+    data = request.data or {}
+    status_val = data.get('status')
+    if status_val and status_val in ['open', 'resolved']:
+        decision.status = status_val
+        decision.save()
+        return JsonResponse({'updated': True, 'status': decision.status}, status=200)
+
+    return JsonResponse({'error': 'Invalid payload'}, status=400)
+
+
+@csrf_exempt
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def api_unload_stats(request):
+    """Get mind lightening statistics for the user"""
+    from datetime import timedelta
+    from .models import Decision
+    
+    now = timezone.now()
+    
+    # Tonight's unloads (after 6pm today)
+    today_6pm = now.replace(hour=18, minute=0, second=0, microsecond=0)
+    if now.hour < 18:
+        # If before 6pm, count from yesterday 6pm
+        today_6pm = today_6pm - timedelta(days=1)
+    
+    tonight_count = Decision.objects.filter(
+        user=request.user,
+        created_at__gte=today_6pm
+    ).count()
+    
+    # Total open loops
+    open_count = Decision.objects.filter(
+        user=request.user,
+        status='open'
+    ).count()
+    
+    # This week
+    week_ago = now - timedelta(days=7)
+    week_count = Decision.objects.filter(
+        user=request.user,
+        created_at__gte=week_ago
+    ).count()
+    
+    # Resolved count (as achievement metric)
+    resolved_count = Decision.objects.filter(
+        user=request.user,
+        status='resolved'
+    ).count()
+    
+    # Generate encouraging messages
+    messages = []
+    if tonight_count > 0:
+        messages.append(f"You unloaded {tonight_count} thing{'s' if tonight_count > 1 else ''} tonight.")
+    if open_count < 5:
+        messages.append("Your mind is lighter.")
+    elif open_count > 10:
+        messages.append(f"Open loops: {open_count}. Time to resolve some?")
+    else:
+        messages.append(f"Open loops: {open_count}.")
+    
+    if week_count > 0:
+        messages.append(f"This week: {week_count} unloaded.")
+    
+    return JsonResponse({
+        'tonight_count': tonight_count,
+        'open_count': open_count,
+        'week_count': week_count,
+        'resolved_count': resolved_count,
+        'messages': messages,
+        'relief_message': 'You don\'t have to hold everything in your head. 💕'
+    }, status=200)
 
 # ==================== SEPARATED VIEWS FOR EACH INPUT TYPE ====================
 # Clean separation of views for task planning, task progress, recipe, peptalk and normal chat

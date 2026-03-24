@@ -128,26 +128,26 @@ WSGI_APPLICATION = 'start_project.wsgi.application'
 
 AUTH_USER_MODEL = 'authentication.User'
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.getenv('POSTGRES_DB'),
-#         'USER': os.getenv('POSTGRES_USER'),
-#         'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
-#         'HOST': os.getenv('POSTGRES_HOST'),
-#         'PORT': os.getenv('POSTGRES_PORT'),
-#     }
-# }
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('AWS_NAME'),
-        'USER': os.getenv('AWS_USER'),
-        'PASSWORD': os.getenv('AWS_PASSWORD'),
-        'HOST': os.getenv('AWS_HOST'),
-        'PORT': os.getenv('DB_PORT'),
+        'NAME': os.getenv('POSTGRES_DB'),
+        'USER': os.getenv('POSTGRES_USER'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+        'HOST': os.getenv('POSTGRES_HOST'),
+        'PORT': os.getenv('POSTGRES_PORT'),
     }
 }
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': os.getenv('AWS_NAME'),
+#         'USER': os.getenv('AWS_USER'),
+#         'PASSWORD': os.getenv('AWS_PASSWORD'),
+#         'HOST': os.getenv('AWS_HOST'),
+#         'PORT': os.getenv('DB_PORT'),
+#     }
+# }
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', default='')
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators

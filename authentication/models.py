@@ -486,9 +486,9 @@ class Subscription(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True)  # Subscription expiry date
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)  # Stripe customer ID
     status_is = models.CharField(max_length=255, null=True, blank=True)
-    # Trial information
-    trial_started_at = models.DateTimeField(null=True, blank=True)  # Trial start datetime
-    trial_used = models.BooleanField(default=False)  # Whether the trial has been used
+
+    trial_started_at = models.DateTimeField(null=True, blank=True)
+    trial_used = models.BooleanField(default=False)  
 
     # Payment & Subscription Information
     payment_method_token = models.CharField(max_length=255, blank=True, null=True)  # Token for payment method (e.g., Stripe token)

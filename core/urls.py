@@ -1,4 +1,3 @@
-# urls.py in the 'core' app - Task Mama AI Integration - SEPARATED VIEWS
 from django.urls import path
 
 # Import self-contained feature view modules
@@ -24,7 +23,15 @@ from .chat_views import (
 )
 
 # Receipt endpoints still rely on legacy class/functions in views.py (not yet refactored)
-from .views import ReceiptUploadView, receipt_preview, save_receipt_by_type
+from .views import (
+    ReceiptUploadView,
+    receipt_preview,
+    save_receipt_by_type,
+    api_unload_decision,
+    api_get_decisions,
+    api_update_decision,
+    api_unload_stats,
+)
 
 urlpatterns = [
     # ==================== NEW PER-FEATURE ENDPOINTS ====================
@@ -60,4 +67,10 @@ urlpatterns = [
     path('upload_receipt/', ReceiptUploadView.as_view(), name='upload_receipt'),
     path('receipt/preview/', receipt_preview, name='receipt_preview'),
     path('receipt/save/<str:receipt_type>/', save_receipt_by_type, name='save_receipt_by_type'),
+
+    # ==================== DECISION / UNLOAD APIS ====================
+    path('api/unload/', api_unload_decision, name='api_unload_decision'),
+    path('api/decisions/', api_get_decisions, name='api_get_decisions'),
+    path('api/decision/<int:decision_id>/', api_update_decision, name='api_update_decision'),
+    path('api/unload-stats/', api_unload_stats, name='api_unload_stats'),
 ]
